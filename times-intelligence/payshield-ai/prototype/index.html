@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PayShield Prototype</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --ink:#1d2330; --muted:#667085; --line:#e4e7ec; --brand:#2f5bea;
+          --low:#3b82f6; --medium:#d97706; --high:#dc2626; --critical:#7f1d1d; --ok:#15803d; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif; background:var(--bg); color:var(--ink); }
+  header { background:#111827; color:#fff; padding:14px 24px; display:flex; align-items:center; gap:12px; }
+  header b { font-size:18px; } header span { color:#9ca3af; font-size:13px; }
+  main { max-width:1180px; margin:0 auto; padding:20px 16px; display:grid; gap:16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px 18px; }
+  h2 { margin:0 0 4px; font-size:16px; } .sub { color:var(--muted); margin:0 0 12px; }
+  .step { display:inline-flex; width:24px; height:24px; border-radius:50%; background:var(--brand); color:#fff;
+          align-items:center; justify-content:center; font-size:12px; margin-right:8px; }
+  button { background:var(--brand); color:#fff; border:0; border-radius:7px; padding:8px 14px; font-weight:600; cursor:pointer; }
+  button.ghost { background:#fff; color:var(--brand); border:1px solid var(--brand); }
+  button:disabled { opacity:.5; cursor:wait; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+  .kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin-top:12px; }
+  .kpi { border:1px solid var(--line); border-radius:8px; padding:10px 12px; }
+  .kpi .v { font-size:20px; font-weight:700; } .kpi .l { color:var(--muted); font-size:12px; }
+  table { width:100%; border-collapse:collapse; margin-top:10px; font-size:13px; }
+  th, td { text-align:left; padding:7px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--muted); font-weight:600; font-size:12px; }
+  .sev { padding:2px 8px; border-radius:99px; color:#fff; font-size:11px; font-weight:700; }
+  .LOW{background:var(--low)} .MEDIUM{background:var(--medium)} .HIGH{background:var(--high)} .CRITICAL{background:var(--critical)}
+  .bar { height:8px; background:var(--line); border-radius:4px; overflow:hidden; min-width:90px; }
+  .bar i { display:block; height:100%; background:var(--brand); }
+  .win { color:var(--ok); font-weight:700; }
+  .log { font:12px/1.4 ui-monospace,Consolas,monospace; background:#0b1020; color:#cbd5e1; border-radius:8px; padding:10px;
+         max-height:140px; overflow:auto; white-space:pre-wrap; }
+  .muted { color:var(--muted); } .tag { background:#eef2ff; color:#3730a3; padding:1px 6px; border-radius:4px; font-size:11px; }
+  input[type=text] { flex:1; min-width:240px; padding:8px 10px; border:1px solid var(--line); border-radius:7px; }
+  .answer { white-space:pre-wrap; background:#f9fafb; border:1px solid var(--line); border-radius:8px; padding:10px; margin-top:10px; }
+  details summary { cursor:pointer; color:var(--brand); }
+</style>
+</head>
+<body>
+<header><b>PayShield AI</b><span>Local prototype · synthetic data · company ACO (tenant A)</span></header>
+<main>
+
+<section class="card">
+  <h2><span class="step">1</span>Train the company model</h2>
+  <p class="sub">Uses only this company's payroll history. Isolation Forest is compared with a robust statistical baseline on the latest months with injected anomalies; the better one is activated if it passes the gate.</p>
+  <div class="row"><button id="btnTrain">Train model</button><button class="ghost" id="btnStatus">Refresh status</button>
+    <span id="trainState" class="muted"></span></div>
+  <div id="model"></div>
+</section>
+
+<section class="card">
+  <h2><span class="step">2</span>Create a test pay run</h2>
+  <p class="sub">Adds a new month for all employees with known problems injected for a few of them (dev-only helper).</p>
+  <div class="row"><button id="btnInject">Create run with anomalies</button><select id="runs"></select></div>
+  <div id="injected"></div>
+</section>
+
+<section class="card">
+  <h2><span class="step">3</span>Analyse the pay run</h2>
+  <p class="sub">Rules + model score each employee against their own history. Risk score is a priority rank, not a probability.</p>
+  <div class="row"><button id="btnAnalyze">Analyse selected run</button><label><input type="checkbox" id="supersede"> re-analyse</label></div>
+  <div id="analysis"></div>
+</section>
+
+<section class="card">
+  <h2><span class="step">4</span>Ask the assistant</h2>
+  <p class="sub">Read-only; employees appear as pseudonyms. With no Azure OpenAI configured it answers deterministically.</p>
+  <div class="row">
+    <input type="text" id="q" value="What are the highest-risk payroll anomalies this month?">
+    <button id="btnAsk">Ask</button>
+  </div>
+  <div class="row" style="margin-top:8px">
+    <button class="ghost" data-q="How many employees have unusual overtime?">Overtime count</button>
+    <button class="ghost" data-q="Summarize payroll risks before finalization.">Summary</button>
+    <button class="ghost" data-q="Approve the payroll now">Try a write request</button>
+  </div>
+  <div id="answer"></div>
+</section>
+
+<section class="card"><h2>Activity</h2><div class="log" id="log"></div></section>
+</main>
+
+<script>
+const H = { "X-PayShield-Service-Key": "__KEY__", "X-Tenant-Uid": "__TENANT__", "X-Company-Uid": "__COMPANY__",
+            "Content-Type": "application/json" };
+let lastAnalysis = null;
+const $ = id => document.getElementById(id);
+const log = m => { $("log").textContent = `${new Date().toLocaleTimeString()}  ${m}\n` + $("log").textContent; };
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const money = v => v == null ? "—" : Number(v).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, { headers: H, ...opts });
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(`${r.status} ${body.code || ""} ${body.detail || ""}`);
+  return body;
+}
+async function busy(btn, fn) { btn.disabled = true; try { await fn(); } catch (e) { log("ERROR " + e.message); } finally { btn.disabled = false; } }
+
+function renderModel(s) {
+  const m = s.activeModel, j = s.latestJob;
+  if (!m) { $("model").innerHTML = `<p class="muted">No active model yet${j ? ` (last job: ${j.status})` : ""}.</p>`; return; }
+  const ev = m.evaluationMetrics, d = ev.detectors || {};
+  const rows = Object.entries(d).map(([k, v]) => `<tr><td>${k === ev.champion ? `<span class="win">✓ ${k}</span>` : k}</td>
+     <td>${v.roc_auc}</td><td>${v.average_precision}</td><td><div class="bar"><i style="width:${v.recall_at_alert*100}%"></i></div> ${(v.recall_at_alert*100).toFixed(1)}%</td>
+     <td>${(v.clean_alert_rate*100).toFixed(1)}%</td></tr>`).join("");
+  const scen = Object.entries(ev.per_scenario_recall || {}).map(([k, v]) =>
+     `<tr><td>${k}</td>${Object.keys(d).map(det => `<td>${(v[det]*100).toFixed(0)}%</td>`).join("")}</tr>`).join("");
+  $("model").innerHTML = `
+    <div class="kpis">
+      <div class="kpi"><div class="v">${m.modelVersion}</div><div class="l">Active model version</div></div>
+      <div class="kpi"><div class="v">${m.detector.replace("_"," ")}</div><div class="l">Chosen detector</div></div>
+      <div class="kpi"><div class="v">${m.trainingRecordCount.toLocaleString()}</div><div class="l">Training observations</div></div>
+      <div class="kpi"><div class="v">${m.trainingPeriodStart.slice(0,7)} → ${m.trainingPeriodEnd.slice(0,7)}</div><div class="l">Training period</div></div>
+      <div class="kpi"><div class="v">${j && j.durationMs ? (j.durationMs/1000).toFixed(1)+"s" : "—"}</div><div class="l">Training time</div></div>
+    </div>
+    <table><tr><th>Detector</th><th>ROC-AUC</th><th>Avg precision</th><th>Recall at alert</th><th>False alerts (clean)</th></tr>${rows}</table>
+    <details style="margin-top:8px"><summary>Recall per injected scenario</summary>
+      <table><tr><th>Scenario</th>${Object.keys(d).map(k => `<th>${k}</th>`).join("")}</tr>${scen}</table></details>
+    <p class="muted">Evaluated on ${ev.n_validation_rows} clean rows + ${ev.n_injected} injected anomalies (synthetic). Gate: ${esc(j?.gate?.reason)}</p>`;
+}
+
+async function refreshStatus() { const s = await api("/api/v1/models/status"); renderModel(s); return s; }
+
+$("btnTrain").onclick = () => busy($("btnTrain"), async () => {
+  const job = await api("/api/v1/models/train", { method: "POST", body: "{}" });
+  log(`training job ${job.jobId} ${job.status}`);
+  for (;;) {
+    const j = await api(`/api/v1/models/training-jobs/${job.jobId}`);
+    $("trainState").textContent = `Job: ${j.status}`;
+    if (!["QUEUED", "RUNNING"].includes(j.status)) { log(`training ${j.status} (${j.durationMs} ms)`); break; }
+    await new Promise(r => setTimeout(r, 1500));
+  }
+  await refreshStatus();
+});
+$("btnStatus").onclick = () => busy($("btnStatus"), refreshStatus);
+
+async function loadRuns(select) {
+  const runs = await (await fetch("/dev/runs")).json();
+  $("runs").innerHTML = runs.map(r => `<option value="${r.uid}">${esc(r.name)} · ${r.period} · ${r.records} records</option>`).join("");
+  if (select) $("runs").value = select;
+}
+$("btnInject").onclick = () => busy($("btnInject"), async () => {
+  const r = await (await fetch("/dev/inject-run", { method: "POST" })).json();
+  log(`created run ${r.period} with ${r.injected.length} injected scenarios`);
+  $("injected").innerHTML = `<table><tr><th>Employee</th><th>Injected scenario</th></tr>${
+    r.injected.map(i => `<tr><td>${i.employeeNo}</td><td><span class="tag">${i.scenario}</span></td></tr>`).join("")}</table>`;
+  await loadRuns(r.payRunId);
+});
+
+$("btnAnalyze").onclick = () => busy($("btnAnalyze"), async () => {
+  const a = await api("/api/v1/payroll/analyze", { method: "POST",
+    body: JSON.stringify({ payRunId: $("runs").value, supersede: $("supersede").checked }) });
+  lastAnalysis = a;
+  log(`analysis ${a.status}: ${a.anomalyCount} findings for ${a.flaggedEmployees}/${a.totalEmployees} employees`);
+  const rows = a.anomalies.map(x => `<tr>
+      <td><span class="sev ${x.severity}">${x.severity}</span></td><td><b>${x.riskScore}</b></td>
+      <td>${x.employeeNo}</td><td>${x.anomalyType.replaceAll("_"," ")}<br><span class="muted">${x.source}${x.ruleId ? " · " + x.ruleId : ""}${x.isExplained ? " · explained" : ""}</span></td>
+      <td>${esc(x.description)}<br><span class="muted">→ ${esc(x.recommendedAction)}</span></td>
+      <td>${money(x.currentValue)}</td><td>${money(x.expectedValue)}${x.expectedMethod ? `<br><span class="muted">${x.expectedMethod}</span>` : ""}</td></tr>`).join("");
+  $("analysis").innerHTML = `
+    <div class="kpis">
+      <div class="kpi"><div class="v">${a.status}</div><div class="l">Status</div></div>
+      <div class="kpi"><div class="v">${a.payrollPeriod}</div><div class="l">Period</div></div>
+      <div class="kpi"><div class="v">${a.flaggedEmployees} / ${a.totalEmployees}</div><div class="l">Employees flagged</div></div>
+      <div class="kpi"><div class="v">${a.maxSeverity || "—"}</div><div class="l">Highest severity</div></div>
+      <div class="kpi"><div class="v">${a.modelVersion || "none"}</div><div class="l">Model · ${a.mlStatus}</div></div>
+    </div>
+    ${a.warnings.length ? `<p class="muted">Warnings: ${a.warnings.map(esc).join("; ")}</p>` : ""}
+    <table><tr><th>Severity</th><th>Risk</th><th>Employee</th><th>Type</th><th>Finding</th><th>Current</th><th>Expected</th></tr>${rows}</table>
+    <p class="muted">${esc(a.riskScoreSemantics)}</p>`;
+});
+
+async function ask(q) {
+  if (!lastAnalysis) { log("analyse a run first"); return; }
+  const r = await api("/api/v1/assistant/ask", { method: "POST", body: JSON.stringify({ question: q, analysisId: lastAnalysis.analysisId }) });
+  $("answer").innerHTML = `<div class="answer"><b>[${r.status}]</b> ${esc(r.answer)}</div>`;
+  log(`assistant ${r.status}`);
+}
+$("btnAsk").onclick = () => busy($("btnAsk"), () => ask($("q").value));
+document.querySelectorAll("[data-q]").forEach(b => b.onclick = () => { $("q").value = b.dataset.q; busy(b, () => ask(b.dataset.q)); });
+
+refreshStatus().catch(e => log("ERROR " + e.message));
+loadRuns().catch(e => log("ERROR " + e.message));
+</script>
+</body>
+</html>

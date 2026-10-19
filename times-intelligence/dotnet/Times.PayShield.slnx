@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Times.PayShield.Client/Times.PayShield.Client.csproj" />
+    <Project Path="src/Times.PayShield.Functions/Times.PayShield.Functions.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Times.PayShield.Client.UnitTests/Times.PayShield.Client.UnitTests.csproj" />
+  </Folder>
+</Solution>

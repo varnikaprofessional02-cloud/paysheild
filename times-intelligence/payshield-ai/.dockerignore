@@ -1,0 +1,7 @@
+tests/
+scripts/
+devtools/
+demo_output/
+**/__pycache__/
+.env
+.payshield-models/

@@ -5,6 +5,7 @@ document.getElementById('nodev')?.remove();
 import { tenantApp, consoleShell, statCard, ICON, logo, toggleSide, MARK, setScenarioMenu, psShell, setPsMenu } from './chrome.js';
 import { COMPANY, ISSUES, POLICIES, GUARDS, pendingIn, payScore, GUARD_SWITCH, HIGH_RISK_GUARDS, setGuardOff, resetGuards, RUN } from './company.js';
 import { buildPages } from './pages.js';
+import { intelligence } from './intelligence.js';
 import { initAgentState, agentBody, recordsBody, agentActions, RUN_PROMPT } from './agentpage.js';
 const CO = COMPANY.name;
 const bm=document.getElementById('brandmark'); if(bm) bm.outerHTML=MARK(40);
@@ -350,7 +351,8 @@ const SC_MODULE = { preflight:'home', payrun:'home', compare:'proof', bank:'bank
 const PAGE_LABEL = { home:'Trust Check', people:GUARDS.people.name, time:GUARDS.time.name, bank:GUARDS.bank.name, pay:GUARDS.pay.name, compliance:GUARDS.compliance.name, proof:'Proof', agent:'PayShield Agent', records:'Pay run records' };
 S.mode = 'page'; S.page = 'home'; S.issues = ISSUES(); S.approved = false; initAgentState(S);
 PAGES.agent = { crumb: 'PayShield › <b>PayShield Agent</b>', body: () => agentBody(S) };
-PAGES.records = { crumb: 'PayShield › <b>Pay run records</b>', body: () => recordsBody(S) }; S.policy = Object.fromEntries(POLICIES.map((p) => [p.id, p.on]));
+PAGES.records = { crumb: 'PayShield › <b>Pay run records</b>', body: () => recordsBody(S) };
+const TI = intelligence({ S, render: () => render() }); Object.assign(PAGES, TI.pages); Object.assign(PAGE_LABEL, TI.labels); S.policy = Object.fromEntries(POLICIES.map((p) => [p.id, p.on]));
 const gCount = (k) => pendingIn(S.issues, k).length, gHeld = (k) => pendingIn(S.issues, k).some((i) => i.status === 'held');
 const MENU_ITEMS = () => [
   { label: 'PayShield', items: [
@@ -358,6 +360,7 @@ const MENU_ITEMS = () => [
     { k:'agent', label:'PayShield Agent', icon:'bot', act:'page:agent', tag:'<span class="new">AI</span>' } ] },
   { label: 'Guards', items: Object.entries(GUARDS).map(([k, g]) => ({ k, label: ({ people:'Employment', time:'Attendance' })[k] || g.name, icon: g.icon, act: 'page:' + k, ...(GUARD_SWITCH.off[k] ? { tag: '<span class="tag t-n ps-offtag">Off</span>' } : { count: gCount(k), held: gHeld(k) }) })) },
   { label: 'Audit', items: [ { k:'records', label:'Pay run records', icon:'receipt', act:'page:records' }, { k:'proof', label:'Proof & test run', icon:'flask', act:'page:proof' }, { k:'validators', label:'Rules & parameters', icon:'settings', act:'go:validators' } ] },
+  ...TI.menu(),
 ];
 setPsMenu(() => ({ company: CO, pending: pendingIn(S.issues).length, active: S.mode === 'page' ? S.page : SC_MODULE[S.sc], groups: MENU_ITEMS() }));
 function logGuard(k, action, o){
@@ -387,7 +390,7 @@ function renderPage(){
   $('#tabs').innerHTML = `<div class="hdr-hint"><label class="hint-narrow">Go to <select id="pgSel">${MENU_ITEMS().flatMap((g) => g.items).map((it) => `<option value="${it.act}" ${it.act === 'page:' + S.page ? 'selected' : ''}>${it.label}</option>`).join('')}</select></label></div>`;
   $('#guide').innerHTML = '';
   $('#stage').innerHTML = `<div class="stagebar ps-bar"><div class="sb-step"><span class="tag t-b">Product view</span><b>${PAGE_LABEL[S.page]}</b><span class="sb-who">· click around freely; ▶ buttons run a step-by-step story</span></div>
-    <div class="sb-ctl"><button class="btn sm" data-act="resetRun">Reset demo data</button></div></div>` + psShell(p.crumb, p.body()) + (S.toast && S.page !== 'home' ? `<div class="ps-toast" role="status"><span>${S.toast.html}</span><button class="btn sm p" data-act="page:home">Back to Trust Check</button><button class="linkbtn" data-act="toastClose" aria-label="Close">✕</button></div>` : '');
+    <div class="sb-ctl"><button class="btn sm" data-act="resetRun">Reset demo data</button></div></div>` + TI.shell(p.crumb, p.body(), MENU_ITEMS(), S.page) + (S.toast && S.page !== 'home' ? `<div class="ps-toast" role="status"><span>${S.toast.html}</span><button class="btn sm p" data-act="page:home">Back to Trust Check</button><button class="linkbtn" data-act="toastClose" aria-label="Close">✕</button></div>` : '');
 }
 function appCo(co, letter, crumb, body, active, user, role){ return tenantApp(co.replace('<br>', ' ').toLowerCase(), letter, crumb, body, active, user, role); }
 function consoleApp(crumb, body){ return consoleShell(crumb, body); }
@@ -527,6 +530,7 @@ const ACT = {
 };
 const AA = agentActions({ S, render: () => render(), reduce });
 Object.assign(ACT, AA, extraActions({ S, render, go, addLog }), extra2Actions({ S, render, go, addLog }), extra3Actions({ S, render, go, addLog }), extra4Actions({ S, render, go, addLog, reduce }), extra5Actions({ S, render, go, addLog }));
+Object.assign(ACT, TI.actions);
 document.addEventListener('change', e => {
   if (e.target && e.target.id === 'scSel') start(e.target.value);
   if (e.target && e.target.id === 'pgSel') { const [a, k] = e.target.value.split(':'); ACT[a](k); }

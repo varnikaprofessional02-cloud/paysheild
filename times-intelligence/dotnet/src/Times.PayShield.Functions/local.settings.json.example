@@ -1,0 +1,12 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "dotnet-isolated",
+    "PayShieldTimersEnabled": "false",
+    "PayShield:BaseUrl": "http://localhost:8080",
+    "PayShield:Audience": "api://payshield-ai",
+    "PayShield:SweeperSchedule": "0 */5 * * * *",
+    "PayShield:RetrainingSchedule": "0 0 18 1 * *"
+  }
+}
