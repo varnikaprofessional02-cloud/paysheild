@@ -7,7 +7,7 @@ import { MODEL_V1 } from './model.js';
 
 const ENV = (typeof import.meta !== 'undefined' && import.meta.env) || {};
 export const COMPANY = {
-  name: ENV.VITE_COMPANY || 'Marina Bay Sands',
+  name: ENV.VITE_COMPANY || 'Times Software Pte Ltd',
   get letter() { return this.name.trim()[0].toUpperCase(); },
 };
 export const RUN = { name: 'September 2026', payDate: '30 Sep 2026', headcount: 219, gross: 1284560, checksPerPerson: 30 };

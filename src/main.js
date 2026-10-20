@@ -182,7 +182,7 @@ bank: {
   steps:[
   { t:'Sign-in from a new device', you:'You are the attacker. Click <b>Sign in</b>.', sys:'Records the device. It has never been used on this account, so the bank-risk signal goes up a little.',
     screen:()=>app('Employee portal › <b>Sign in</b>', `<div class="attacker" style="max-width:380px;margin:0 auto">Attacker · stolen password · new Windows laptop</div>
-      <div class="card login"><b style="font-size:17px">Sign in to your HR portal</b><p class="muted small" style="margin:4px 0 14px">${CO} Pte Ltd</p>
+      <div class="card login"><b style="font-size:17px">Sign in to your HR portal</b><p class="muted small" style="margin:4px 0 14px">${/ pte ltd$/i.test(CO) ? CO : CO + ' Pte Ltd'}</p>
       <div class="field"><label>Email</label><div class="in">daniel.lim@example.sg</div></div><div class="field"><label>Password</label><div class="in">••••••••••</div></div>
       <button class="btn p pulse" style="width:100%" data-act="next">Sign in</button></div>`, 'My Profile', 'DL', 'Employee') },
   { t:'Bank account changed', you:'Click <b>Verify and save</b>.', sys:'Saves the change and starts a 3-day cooling-off, so the new account can’t be paid this payday. Sends an alert to Daniel’s old phone and email, which the attacker can’t switch off.',
