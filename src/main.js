@@ -3,7 +3,7 @@ import './style.css';
 document.documentElement.setAttribute('data-theme', 'light');
 document.getElementById('nodev')?.remove();
 import { tenantApp, consoleShell, statCard, ICON, logo, toggleSide, MARK, setScenarioMenu, psShell, setPsMenu } from './chrome.js';
-import { COMPANY, ISSUES, POLICIES, GUARDS, pendingIn, payScore, GUARD_SWITCH, HIGH_RISK_GUARDS, setGuardOff, resetGuards, RUN } from './company.js';
+import { COMPANY, ISSUES, POLICIES, GUARDS, pendingIn, payScore, GUARD_SWITCH, HIGH_RISK_GUARDS, setGuardOff, resetGuards, RUN, isRemoval } from './company.js';
 import { buildPages } from './pages.js';
 import { initAgentState, agentBody, recordsBody, agentActions, RUN_PROMPT } from './agentpage.js';
 const CO = COMPANY.name;
@@ -371,8 +371,8 @@ function turnOff(d, approver){
   S.toast = { html: `<b>${GUARDS[d.key].name} turned off</b> for ${d.scope === 'run' ? RUN.name : 'all runs until turned on'}${approver ? `, approved by ${approver}` : ''}. Its checks are skipped; Pay Score ${before} → <b>${payScore(S.issues).score}</b>` };
   render();
 }
-function rescored(before, what){ const p = payScore(S.issues), left = pendingIn(S.issues).length;
-  S.toast = { html: `<b>${what}.</b> Trust Check re-scored: Pay Score ${before} → <b>${p.score}</b>${left ? ` · ${left} alert${left > 1 ? 's' : ''} left` : ' · ready to approve'}` }; render(); }
+function rescored(before, what, warn){ const p = payScore(S.issues), left = pendingIn(S.issues).length;
+  S.toast = { warn: !!warn, html: `<b>${what}.</b> Trust Check re-scored: Pay Score ${before} → <b>${p.score}</b>${left ? ` · ${left} alert${left > 1 ? 's' : ''} left` : ' · ready to approve'}` }; render(); }
 function openPage(k, keepFocus){ clearTimer(); if (!keepFocus) S.focus = null; if (k === 'home') S.toast = null; S.mode = 'page'; S.page = k; render();
   const el = S.focus && document.getElementById('iss-' + S.focus);
   if (el) el.scrollIntoView({ block: 'center', behavior: reduce ? 'auto' : 'smooth' }); else window.scrollTo?.({ top: 0 }); }
@@ -387,7 +387,7 @@ function renderPage(){
   $('#tabs').innerHTML = `<div class="hdr-hint"><label class="hint-narrow">Go to <select id="pgSel">${MENU_ITEMS().flatMap((g) => g.items).map((it) => `<option value="${it.act}" ${it.act === 'page:' + S.page ? 'selected' : ''}>${it.label}</option>`).join('')}</select></label></div>`;
   $('#guide').innerHTML = '';
   $('#stage').innerHTML = `<div class="stagebar ps-bar"><div class="sb-step"><span class="tag t-b">Product view</span><b>${PAGE_LABEL[S.page]}</b><span class="sb-who">· click around freely; ▶ buttons run a step-by-step story</span></div>
-    <div class="sb-ctl"><button class="btn sm" data-act="resetRun">Reset demo data</button></div></div>` + psShell(p.crumb, p.body()) + (S.toast && S.page !== 'home' ? `<div class="ps-toast" role="status"><span>${S.toast.html}</span><button class="btn sm p" data-act="page:home">Back to Trust Check</button><button class="linkbtn" data-act="toastClose" aria-label="Close">✕</button></div>` : '');
+    <div class="sb-ctl"><button class="btn sm" data-act="resetRun">Reset demo data</button></div></div>` + psShell(p.crumb, p.body()) + (S.toast && S.page !== 'home' ? `<div class="ps-toast ${S.toast.warn ? 'warn' : ''}" role="status"><span>${S.toast.html}</span><button class="btn sm p" data-act="page:home">Back to Trust Check</button><button class="linkbtn" data-act="toastClose" aria-label="Close">✕</button></div>` : '');
 }
 function appCo(co, letter, crumb, body, active, user, role){ return tenantApp(co.replace('<br>', ' ').toLowerCase(), letter, crumb, body, active, user, role); }
 function consoleApp(crumb, body){ return consoleShell(crumb, body); }
@@ -481,7 +481,7 @@ const ACT = {
   guardOffApprove(){ const d = S.offDraft; if (d) turnOff(d, 'Grace Lim'); },
   tcRun(){ if (!S.tc || !S.tc.running) runTrustCheck(); },
   exitDemo(){ openPage(S.returnTo || 'home'); },
-  fix(id){ const i = S.issues.find((x) => x.id === id); if (!i) return; const b = payScore(S.issues).score; i.state = 'fixed'; rescored(b, i.name + ' fixed'); },
+  fix(id){ const i = S.issues.find((x) => x.id === id); if (!i) return; const b = payScore(S.issues).score; i.state = 'fixed'; rescored(b, isRemoval(i) ? `⚠ ${i.name} removed from this pay run` : i.name + ' fixed', isRemoval(i)); },
   alt(id){ const i = S.issues.find((x) => x.id === id); if (!i) return; const b = payScore(S.issues).score; i.state = 'accepted'; rescored(b, i.name + ' accepted with reason'); },
   undo(id){ const i = S.issues.find((x) => x.id === id); if (!i) return; i.state = 'open'; render(); },
   fixAll(g){ const b = payScore(S.issues).score, n = pendingIn(S.issues, g).length; pendingIn(S.issues, g).forEach((i) => { i.state = 'fixed'; }); rescored(b, `${n} fixes applied`); },

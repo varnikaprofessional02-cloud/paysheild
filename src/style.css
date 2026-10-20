@@ -656,3 +656,11 @@ tr.ar-trace td{background:var(--surface2)}
 .ar-step.skip{opacity:.65}.ar-step.skip .ar-ic{background:var(--surface2);border-color:var(--line2,#cbd5e1)}
 .ps-offtag{margin-left:auto;background:rgba(255,255,255,.18)!important;color:#fff!important;border:0!important}
 tr.ar-cfg td{background:var(--surface2)}
+
+/* ===== Removals from the pay run read as warnings, not successes ===== */
+.ps-issue.is-removed{border-left-color:#f59e0b;background:var(--warn-soft)}
+.is-removed .ps-imp b{color:var(--warn)}
+.ps-done.warn{color:var(--warn)}
+.ar-note.warn,.ar-q-done.warn{background:var(--warn-soft);border-color:var(--warn-line);color:var(--ink)}
+tr.ar-rm td{background:var(--warn-soft)}
+.ps-toast.warn{border-color:var(--warn-line);background:var(--warn-soft)}
