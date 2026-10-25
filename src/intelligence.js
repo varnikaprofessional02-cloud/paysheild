@@ -68,6 +68,15 @@ export function intelligence({ S, render, openPage }) {
     return `<div class="tr-wrap">${ring}<div class="tr-list">${list}</div></div>`;
   }
 
+  function onboardBody() {
+    const n = ['Load payroll history', 'Learn each employee’s normal pay', 'Unlock PayShield'];
+    return `${errBox()}<div class="card" style="text-align:center;padding:40px 24px">
+      <div style="font-size:42px">🧠</div><h3 style="margin:8px 0 4px;font-size:20px">Train your model</h3>
+      <p class="muted" style="max-width:520px;margin:0 auto 18px">You're subscribed. Before PayShield can check pay runs, it needs to learn your company's own payroll history. This takes under a minute and uses only your data.</p>
+      <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-bottom:22px">${n.map((x, i) => `<span class="tag t-b">${i + 1}. ${x}</span>`).join('')}</div>
+      <button class="btn p" data-act="page:tiTrain">Train your model →</button></div>`;
+  }
+
   function trainBody() {
     lazy('model', loadModel);
     const m = T.status?.activeModel, j = T.status?.latestJob, ev = m?.evaluationMetrics, d = ev?.detectors || {};
@@ -105,7 +114,7 @@ export function intelligence({ S, render, openPage }) {
     return `${errBox()}<div class="card"><div class="ps-ih"><div><b>AI anomaly detection</b><div class="small muted">Rules + your company's model, checked against each employee's own pay history.</div></div></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px">
         <select id="tiRunSel" style="min-width:280px;padding:6px">${T.runs.map((r) => `<option value="${r.uid}" ${r.uid === T.run ? 'selected' : ''}>${esc(r.name)} · ${esc(r.period)} · ${r.records} employees</option>`).join('')}</select>
-        ${btn('tiAnalyze', 'Analyse pay run', true)}${btn('tiInject', '+ Test run with anomalies')}</div>
+        ${btn('tiAnalyze', 'Analyse pay run', true)}${T.ctx && !T.ctx.demo ? '' : btn('tiInject', '+ Test run with anomalies')}</div>
       ${T.injected ? `<p class="small muted" style="margin-top:8px">Test run ${esc(T.injected.period)} created. Injected: ${T.injected.injected.map((i) => `<span class="tag t-n">${esc(i.employeeNo)} · ${esc(i.scenario)}</span>`).join(' ')}</p>` : ''}</div>${res}`;
   }
 
@@ -147,19 +156,21 @@ export function intelligence({ S, render, openPage }) {
   const STATIC = { 'BASIC v5': ['Dashboard', 'Company Policy'], PRODUCT: ['EPM', 'Pay', 'Leave', 'IRAS', 'Claim', 'Query Builder'] };
   function shell(crumb, body, groups, active) {
     document.body.classList.add('tp-mode');
-    const on = !!T.sub?.subscribed;
+    const on = !!T.sub?.subscribed, trained = !!T.status?.activeModel;
+    if (on && !trained && T.status && active !== 'tiTrain' && active !== 'tiOnboard') return shell(crumb, onboardBody(), groups, 'tiOnboard');
     const item = (it) => `<a class="it ${it.k === active ? 'on' : ''}" data-act="${it.act}">${ICON[it.icon] || DOT}<span>${esc(it.label)}</span>${it.count ? `<span class="n">${it.count}</span>` : ''}</a>`;
-    const ti = on ? [...groups.slice(0, -1), groups[groups.length - 1]].map((g) => `<div class="sub">${esc(g.label)}</div>${g.items.map(item).join('')}`).join('')
+    const ti = on && !trained ? `<div class="sub">Get started</div>${item({ k: 'tiTrain', label: 'Train your model', icon: 'flask', act: 'page:tiTrain' })}<button class="tpbtn out" data-act="tiUnsubscribe" ${T.busy ? 'disabled' : ''}>Unsubscribe</button>`
+      : on ? groups.map((g) => `<div class="sub">${esc(g.label)}</div>${g.items.map(item).join('')}`).join('')
       + `<button class="tpbtn out" data-act="tiUnsubscribe" ${T.busy ? 'disabled' : ''}>Unsubscribe</button>`
       : `<div class="subbox"><b>Times Intelligence</b><p>PayShield pay run assurance and ML anomaly detection trained on your own payroll.</p><button class="tpbtn" data-act="tiSubscribe" ${T.busy ? 'disabled' : ''}>${T.busy === 'tiSubscribe' ? 'Subscribing…' : 'Subscribe to Times Intelligence'}</button></div>`;
     const title = (crumb.match(/<b>(.*?)<\/b>/) || [, crumb])[1];
-    return `<div class="tp"><aside><div class="co"><i></i>CARLTON HOTEL<br>(SINGAPORE) PTE LTD</div>
+    return `<div class="tp"><aside><div class="co"><i></i>${esc(T.ctx?.companyName || 'CARLTON HOTEL (SINGAPORE) PTE LTD')}</div>
       ${Object.entries(STATIC).map(([h, xs]) => `<div class="${h === 'PRODUCT' ? 'sec' : 'plan'}">${h}</div>${xs.map((x) => `<a class="it dim">${DOT}<span>${x}</span></a>`).join('')}`).join('')}
       <div class="sec ti">TIMES INTELLIGENCE <span class="new">NEW</span></div>${ti}
-      <div class="ft">Times Portal · prod-is-down · <button data-act="resetRun">reset demo data</button></div></aside>
+      <div class="ft">Times Portal · ${esc(T.ctx?.database || 'prod-is-down')} · <button data-act="resetRun">reset demo data</button></div></aside>
       <main><div class="top"><div><div style="color:#6b7280">Welcome back, Thilanka Potter!</div><b>October, 2026</b></div>
       <div class="who"><span class="av">TP</span><div><b>Thilanka Potter</b><div style="color:#6b7280;font-size:11px">Payroll Admin</div></div></div></div>
-      <div class="content"><h2>${on ? title : "Times Intelligence"}</h2>${on || active === 'tiSubscribe' ? body : subscribeBody()}</div></main></div>`;
+      <div class="content"><h2>${!on ? 'Times Intelligence' : active === 'tiOnboard' ? 'Welcome to Times Intelligence' : title}</h2>${on || active === 'tiSubscribe' ? (on && !T.status ? '<div class="card muted">Checking your company model…</div>' : body) : subscribeBody()}</div></main></div>`;
   }
 
   const pages = {
@@ -175,7 +186,7 @@ export function intelligence({ S, render, openPage }) {
   ] : [] }];
 
   const actions = {
-    tiSubscribe: () => act('tiSubscribe', async () => { T.sub = await api('/api/v1/intelligence/subscribe', { method: 'POST' }); toast('<b>✓ Successfully subscribed to Times Intelligence.</b> AI anomaly detection and Train model are now in the menu'); }),
+    tiSubscribe: () => act('tiSubscribe', async () => { T.sub = await api('/api/v1/intelligence/subscribe', { method: 'POST' }); await loadModel(); toast(T.status.activeModel ? '<b>✓ Successfully subscribed to Times Intelligence.</b>' : '<b>✓ Successfully subscribed.</b> Train your company model to unlock PayShield'); }),
     tiUnsubscribe: () => {
       if (!confirm('Unsubscribe from Times Intelligence? Trained models and past analyses are kept.')) return;
       act('tiUnsubscribe', async () => { T.sub = await api('/api/v1/intelligence/unsubscribe', { method: 'POST' }); T.analysis = T.answer = null; toast('Unsubscribed from Times Intelligence'); });
@@ -185,7 +196,7 @@ export function intelligence({ S, render, openPage }) {
       const job = await api('/api/v1/models/train', { method: 'POST', body: '{}' });
       for (let tick = 0; ; tick++) {
         const j = await api(`/api/v1/models/training-jobs/${job.jobId}`);
-        if (!['QUEUED', 'RUNNING'].includes(j.status)) { T.failed = j.status !== 'SUCCEEDED'; T.step = T.failed ? T.step : 99; T.pct = T.failed ? T.pct : 100; T.secs = j.durationMs / 1000; toast(`Model training ${j.status.toLowerCase()} in ${(j.durationMs / 1000).toFixed(1)}s`); break; }
+        if (!['QUEUED', 'RUNNING'].includes(j.status)) { T.failed = j.status !== 'SUCCEEDED'; T.step = T.failed ? T.step : 99; T.pct = T.failed ? T.pct : 100; T.secs = j.durationMs / 1000; toast(j.status === 'SUCCEEDED' && !T.status?.activeModel ? `<b>✓ Model trained in ${(j.durationMs / 1000).toFixed(1)}s.</b> Times Intelligence is unlocked — all PayShield menus are now available` : `Model training ${j.status.toLowerCase()} in ${(j.durationMs / 1000).toFixed(1)}s`); break; }
         T.pct = Math.min(96, Math.round(100 * (1 - Math.exp(-(tick + 1) / 7)))); T.step = Math.min(4, Math.floor(T.pct / 20)); render();
         await new Promise((r) => setTimeout(r, 1200));
       }
@@ -198,7 +209,10 @@ export function intelligence({ S, render, openPage }) {
   };
 
   document.addEventListener('change', (e) => { if (e.target?.id === 'tiRunSel') T.run = e.target.value; });
-  api('/api/v1/intelligence/subscription').then((s) => { T.sub = s; }).catch((e) => { T.err = e.message; }).finally(render);
+  // the local API tells us which tenant/company it serves (run_local_db.py / run_portal_prototype.py)
+  fetch('/dev/context').then((r) => (r.ok ? r.json() : null)).catch(() => null).then((ctx) => {
+    if (ctx) { H['X-Tenant-Uid'] = ctx.tenantUid; H['X-Company-Uid'] = ctx.companyUid; T.ctx = ctx; }
+    return api('/api/v1/intelligence/subscription'); }).then(async (s) => { T.sub = s; if (s.subscribed) { await loadModel(); T.loaded.model = true; } }).catch((e) => { T.err = e.message; }).finally(render);
 
   return { pages, labels, menu, actions, shell };
 }

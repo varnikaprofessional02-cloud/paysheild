@@ -101,6 +101,11 @@ def main() -> None:
         html = (ROOT / "prototype" / "portal.html").read_text(encoding="utf-8")
         return html.replace("__KEY__", KEY).replace("__TENANT__", TENANT).replace("__COMPANY__", COMPANY.uid)
 
+    @app.get("/dev/context")
+    def context():
+        return {"tenantUid": TENANT, "companyUid": COMPANY.uid, "companyName": "CARLTON HOTEL (SINGAPORE) PTE LTD",
+                "database": SUB_DB, "demo": True}
+
     @app.get("/dev/runs")
     def runs():
         with psycopg.connect(dsn, row_factory=dict_row) as c:
