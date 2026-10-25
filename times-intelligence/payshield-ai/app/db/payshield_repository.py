@@ -61,10 +61,22 @@ class PostgresPayShieldRepository:
             RETURNING uid::text AS uid, status, modules, subscribed_on, subscribed_by""", {"c": company_id, "a": actor})
 
     def unsubscribe(self, company_id: int, actor: str) -> dict | None:
-        # data (models, analyses, feedback) is kept so a later re-subscription continues where it left off
+        # the company's AI data is removed separately by purge_company_data
         return self._one("""UPDATE times_intelligence.subscription SET status='CANCELLED', cancelled_on=now(), cancelled_by=%(a)s,
                 updated_on=now(), updated_by=%(a)s WHERE company_id=%(c)s
             RETURNING uid::text AS uid, status, modules, subscribed_on, subscribed_by""", {"c": company_id, "a": actor})
+
+    # every AI row for the company, in one transaction; settings (overtime codes) and the subscription row stay
+    _PURGE = (("feedback", "company_id"), ("assistant_audit", "company_id"), ("analysis", "company_id"),
+              ("run_watermark", "company_id"), ("training_job", "company_id"), ("model_registry", "company_id"),
+              ("area_model", "company_id"))
+
+    def purge_company_data(self, company_id: int) -> dict[str, int]:
+        counts = {}
+        with self.conn.connection(self.db) as c, c.transaction():
+            for table, col in self._PURGE:  # anomalies go with their analysis (ON DELETE CASCADE)
+                counts[table] = c.execute(f"DELETE FROM times_intelligence.{table} WHERE {col} = %(c)s", {"c": company_id}).rowcount
+        return counts
 
     # settings -------------------------------------------------------------------------------
     def get_company_setting(self, company_id: int) -> CompanySettingRecord:

@@ -12,7 +12,7 @@ const H = {
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const num = (v) => (v == null ? '—' : Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
 const SEV = { CRITICAL: 't-r', HIGH: 't-r', MEDIUM: 't-o', LOW: 't-b' };
-const QUESTIONS = ['What are the highest-risk payroll anomalies this month?', 'How many employees have unusual overtime?', 'Which employees had a salary change without a revision?'];
+const QUESTIONS = ['What are the highest-risk payroll anomalies this month?', 'How many employees have unusual overtime?', 'Any identity issues?', 'List all employees', 'Total payroll for the last 6 pay runs', 'Compare this pay run with last month', 'Is CPF due on share awards?', 'Which employees had a salary change without a revision?'];
 const TRAIN_STEPS = [['Load payroll history', 'Approved pay records, own company only'], ['Build features', 'Each month vs the employee’s own prior months'],
   ['Train detectors', 'Isolation Forest + robust baseline'], ['Evaluate', 'Injected anomalies: recall and false-alert rate'], ['Register model', 'Quality gate, version, activate']];
 
@@ -39,18 +39,36 @@ export function intelligence({ S, render, openPage }) {
   const loadRuns = async (select) => { T.runs = await (await fetch('/dev/runs')).json(); T.run = select || T.run || T.runs[0]?.uid || ''; };
 
   /* ---------- pages ---------- */
+  const hero = (ic, title, sub, right = '', tone = '') => `<div class="ti-hero ${tone}"><span class="ti-hic">${ic}</span><div class="ti-ht"><h3>${title}</h3><p>${sub}</p></div><div class="ti-hr">${right}</div></div>`;
+  const panel = (title, sub, content, right = '') => `<section class="ti-panel"><header><div><h4>${title}</h4>${sub ? `<p>${sub}</p>` : ''}</div>${right}</header>${content}</section>`;
+  const kpis = (xs) => `<div class="ti-kpis">${xs.map(([ic, l, v, s, tone]) => `<div class="ti-kpi ${tone || ''}"><span class="ti-kic">${ic}</span><div><small>${l}</small><b>${v}</b><em>${s}</em></div></div>`).join('')}</div>`;
+  const cap = (x) => String(x || '').replace(/^./, (c) => c.toUpperCase());
+  const AREA_LIST = [
+    ['PAYROLL', 'Payroll', '💰', 'Pay anomalies per employee vs their own history (ML model + 17 payroll rules)', false],
+    ['IDENTIFICATION', 'Identification', '🪪', 'Duplicate NRIC/FIN, shared bank accounts, work pass expiry, missing IDs, changes since training', false],
+    ['ATTENDANCE', 'Attendance', '🕒', 'Clock-in patterns, buddy punching, missed clock-outs', true],
+    ['EPM', 'EPM', '🗂', 'Employee records: job, grade and contract consistency', true],
+    ['TIMESHEET', 'Timesheet', '📋', 'Hours vs roster, unusual overtime claims', true],
+    ['CLAIMS', 'Claims', '🧾', 'Unusual expense claims vs the employee’s and team’s history', true]];
+  const areaOf = (k) => (T.status?.areas || []).find((a) => a.area === k);
+  const isTrained = (k) => (k === 'PAYROLL' ? !!T.status?.activeModel : !!areaOf(k));
+  const anyTrained = () => AREA_LIST.some(([k]) => isTrained(k));
+  T.sel = new Set(['PAYROLL', 'IDENTIFICATION']); T.areaRun = [];
+  const bar = (p, tone = '') => `<span class="ti-bar ${tone}"><i style="width:${Math.max(0, Math.min(100, p))}%"></i></span>`;
+
   function subscribeBody() {
-    if (!T.sub) return `${errBox()}<div class="card muted">Checking subscription… (is the PayShield AI service running on :8080?)</div>`;
+    if (!T.sub) return `${errBox()}<div class="ti-empty"><span class="tr-spin"></span><br><b>Connecting to Times Intelligence…</b><p>Is the PayShield AI service running on :8080?</p></div>`;
     const on = T.sub.subscribed;
-    return `${errBox()}<div class="card" style="max-width:720px">
-      <div class="ps-ih"><span class="kpi-ic">${ICON.spark}</span><div><b>Times Intelligence</b><div class="small muted">ML anomaly detection trained on your own payroll history, one model per company.</div></div>
-      <div class="ps-ir"><span class="tag ${on ? 't-g' : 't-n'}">${on ? 'Subscribed' : 'Not subscribed'}</span></div></div>
-      <ul class="small" style="margin:12px 0 14px 18px;line-height:1.7">
-        <li><b>Anomaly detection</b>: every pay record compared with the employee's own history, plus 17 deterministic payroll rules.</li>
-        <li><b>Train model</b>: train, evaluate and roll back your company model.</li>
-        <li><b>Assistant</b>: read-only questions about the findings.</li></ul>
-      ${on ? `<p class="small muted">Subscribed ${esc((T.sub.subscribedOn || '').slice(0, 10))}${T.sub.subscribedBy ? ' by ' + esc(T.sub.subscribedBy) : ''}.</p>${btn('tiUnsubscribe', 'Unsubscribe')}`
-        : btn('tiSubscribe', 'Subscribe to Times Intelligence', true)}</div>`;
+    const feats = [[ICON.spark, 'AI anomaly detection', 'Every pay record compared with the employee’s own history, plus 17 deterministic payroll rules.'],
+      [ICON.flask, 'Your own model', 'Trained only on your company’s payroll. Evaluate, version and roll back any time.'],
+      [ICON.bot, 'Ask PayShield', 'Plain-language answers about the findings. Read-only; never changes payroll.']];
+    const how = ['Subscribe', 'Train your model', 'Analyse each pay run', 'Review the findings'];
+    return `${errBox()}${hero(ICON.spark, 'Times Intelligence', 'Catch payroll errors before money moves, with a model that learns how <b>your</b> company pays.',
+      `<span class="ti-pill ${on ? 'ok' : ''}">${on ? '● Subscribed' : 'Not subscribed'}</span>`)}
+      <div class="ti-feats">${feats.map(([i, t, d]) => `<div class="ti-feat"><span class="ti-kic">${i}</span><b>${t}</b><p>${d}</p></div>`).join('')}</div>
+      ${panel('How it works', '', `<ol class="ti-how">${how.map((x, i) => `<li><span>${i + 1}</span>${x}</li>`).join('')}</ol>`)}
+      <div class="ti-cta">${on ? `<p>Subscribed on <b>${esc((T.sub.subscribedOn || '').slice(0, 10))}</b>${T.sub.subscribedBy ? ' by ' + esc(T.sub.subscribedBy) : ''}. Unsubscribing deletes all models, analyses and findings for this company.</p>${btn('tiUnsubscribe', 'Unsubscribe')}`
+        : `<p>Your data stays in your own database. No payroll is changed.</p><button class="btn p ti-big" data-act="tiSubscribe" ${T.busy ? 'disabled' : ''}>${T.busy === 'tiSubscribe' ? 'Subscribing…' : 'Subscribe to Times Intelligence →'}</button>`}</div>`;
   }
 
 
@@ -65,7 +83,8 @@ export function intelligence({ S, render, openPage }) {
       <div class="tr-mid"><b style="color:${col}">${T.failed ? '✕' : pct + '%'}</b><small>${T.failed ? 'failed' : done ? 'trained in ' + secs.toFixed(1) + 's' : secs.toFixed(0) + 's elapsed'}</small></div></div>`;
     const list = TRAIN_STEPS.map(([t, d], i) => { const st = done || T.step > i ? 'ok' : T.step === i ? (T.failed ? 'bad' : 'run') : 'wait';
       return `<div class="tr-st ${st}"><span class="tr-ic">${st === 'ok' ? '✓' : st === 'bad' ? '✕' : st === 'run' ? '' : i + 1}</span><div><b>${t}</b><small>${d}</small></div></div>`; }).join('');
-    return `<div class="tr-wrap">${ring}<div class="tr-list">${list}</div></div>`;
+    const slow = !done && !T.failed && pct >= 90 ? `<div class="ti-warn" style="margin:12px 0 0">Still training: the server is still working on it. Large payrolls (thousands of employees) can take 5–10 minutes; this page updates by itself when it finishes.</div>` : '';
+    return `<div class="tr-wrap">${ring}<div class="tr-list">${list}</div></div>${slow}`;
   }
 
   function onboardBody() {
@@ -80,42 +99,78 @@ export function intelligence({ S, render, openPage }) {
   function trainBody() {
     lazy('model', loadModel);
     const m = T.status?.activeModel, j = T.status?.latestJob, ev = m?.evaluationMetrics, d = ev?.detectors || {};
-    const steps = progressPanel();
-    const model = !m ? `<div class="card muted">No active model yet${j ? ` (last job ${esc(j.status)})` : ''}. Click <b>Train model</b>.</div>` : `
-      <div class="kpis" style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px">
-        ${statCard(ICON.chart, 'Active model', 'v' + m.modelVersion, esc(m.detector.replace('_', ' ')))}
-        ${statCard(ICON.users, 'Training records', m.trainingRecordCount.toLocaleString(), 'employee-months')}
-        ${statCard(ICON.calendar, 'Training period', m.trainingPeriodStart.slice(0, 7), 'to ' + m.trainingPeriodEnd.slice(0, 7))}
-        ${statCard(ICON.clock, 'Training time', j?.durationMs ? (j.durationMs / 1000).toFixed(1) + 's' : '—', esc(j?.status || ''))}</div>
-      <div class="card" style="margin-top:12px"><b>Detector evaluation</b><div class="tblwrap"><table class="g" style="margin-top:8px"><tr><th>Detector</th><th>ROC-AUC</th><th>Recall at alert</th><th>False alerts on clean data</th></tr>
-        ${Object.entries(d).map(([k, v]) => `<tr><td>${k === ev.champion ? '✓ <b>' + k + '</b>' : k}</td><td>${v.roc_auc}</td><td>${(v.recall_at_alert * 100).toFixed(1)}%</td><td>${(v.clean_alert_rate * 100).toFixed(1)}%</td></tr>`).join('')}</table></div>
-        <p class="small muted">Evaluated on ${ev.n_validation_rows} clean rows + ${ev.n_injected} injected anomalies. Gate: ${esc(j?.gate?.reason)}.</p></div>`;
-    const vers = T.versions.length ? `<div class="tblwrap"><table class="g"><tr><th>Version</th><th>Status</th><th>Detector</th><th>Records</th><th>Trained</th><th></th></tr>${T.versions.map((x) => `<tr><td>${x.modelVersion}</td><td>${esc(x.status)}</td><td>${esc(x.detector)}</td><td>${x.trainingRecordCount}</td><td>${esc(x.trainingCompletedAt.slice(0, 16).replace('T', ' '))}</td><td>${x.status !== 'ACTIVE' && x.status !== 'REJECTED' ? `<button class="linkbtn" data-act="tiActivate:${x.modelId}">Roll back to this</button>` : ''}</td></tr>`).join('')}</table></div>` : '<span class="small muted">No models yet.</span>';
-    return `${errBox()}<div class="card"><div class="ps-ih"><div><b>Train your company model</b><div class="small muted">Uses this company's own payroll history only. A new model is activated only if it passes the quality gate.</div></div><div class="ps-ir">${btn('tiTrain', 'Train model', true)}</div></div>${steps}</div>
-      <div style="margin-top:12px">${model}</div><div class="card" style="margin-top:12px"><b>Model versions</b><div style="margin-top:8px">${vers}</div></div>`;
+    const running = T.busy === 'tiTrain', n = T.sel.size;
+    const top = hero(ICON.flask, 'Train Times Intelligence', 'Choose the areas to train. Each area learns from this company’s own data only; a new version goes live only if it passes its checks.',
+      `<button class="btn p ti-big" data-act="tiTrain" ${T.busy || !n ? 'disabled' : ''}>${running ? 'Training…' : n ? `Train ${n} selected area${n > 1 ? 's' : ''}` : 'Select an area'}</button>`);
+    const cards = AREA_LIST.map(([k, l, ic, d, mock]) => {
+      const on = T.sel.has(k), a = k === 'PAYROLL' ? m : areaOf(k);
+      const when = k === 'PAYROLL' ? m?.trainingCompletedAt : a?.trainedOn;
+      return `<label class="ar-card ${on ? 'on' : ''}" data-act="tiArea:${k}"><span class="ar-cb">${on ? '✓' : ''}</span><span class="ar-ic">${ic}</span>
+        <div class="ar-tx"><b>${l}</b>${mock ? '<span class="ar-demo">Demo</span>' : ''}<small>${esc(d)}</small>
+        <span class="ti-pill ${a ? 'ok' : ''}">${a ? `Trained v${esc(k === 'PAYROLL' ? m.modelVersion : a.version)} · ${esc(String(when || '').slice(0, 10))}` : 'Not trained'}</span></div></label>`;
+    }).join('');
+    const pick = panel('Training areas', `${n} of ${AREA_LIST.length} selected · Demo areas train on mock data so the flow can be shown`,
+      `<div class="ar-grid">${cards}</div>`, `<span><button class="linkbtn" data-act="tiAreaAll:1">Select all</button> · <button class="linkbtn" data-act="tiAreaAll:0">Clear</button></span>`);
+    const runRows = T.areaRun.length ? `<div class="ar-run">${T.areaRun.map((x) => {
+      const meta = AREA_LIST.find((a) => a[0] === x.k);
+      const s = x.res?.summary || {};
+      const sub = x.k === 'PAYROLL' ? (x.state === 'ok' ? 'Model trained and activated' : x.state === 'bad' ? 'Training failed' : 'Training in the background…')
+        : x.k === 'IDENTIFICATION' && x.res ? `${(s.employees || 0).toLocaleString()} employees baselined · ${s.openFindings || 0} identity issue(s) found now`
+          : x.res?.isMock ? 'Demo area: mock model recorded' : 'Training…';
+      return `<div class="ar-row ${x.state}"><span class="tr-ic">${x.state === 'ok' ? '✓' : x.state === 'bad' ? '✕' : ''}</span><span>${meta[2]}</span><b>${meta[1]}</b><small>${sub}</small>${x.res ? `<em>${(x.res.durationMs / 1000).toFixed(1)}s</em>` : ''}</div>`;
+    }).join('')}</div>` : '';
+    const prog = (T.areaRun.some((x) => x.k === 'PAYROLL') ? progressPanel() : '') + runRows;
+    const ident = areaOf('IDENTIFICATION');
+    const others = (T.status?.areas || []).length ? panel('Other trained areas', '', `<div class="ar-grid">${(T.status.areas).map((a) => {
+      const meta = AREA_LIST.find((x) => x[0] === a.area) || [a.area, a.label, '•'];
+      const s = a.summary || {};
+      return `<div class="ar-sum"><span class="ar-ic">${meta[2]}</span><div><b>${esc(a.label)} v${a.version}</b>${a.isMock ? '<span class="ar-demo">Demo</span>' : ''}
+        <small>${a.area === 'IDENTIFICATION' ? `${(s.employees || 0).toLocaleString()} employees · ${s.withNric || 0} NRIC · ${s.withWorkPass || 0} work passes · ${s.withBankAccount || 0} bank accounts baselined` : esc(s.note || '')}</small>
+        <small>${a.isMock ? `Mock recall ${Math.round((s.recallAtAlert || 0) * 100)}% · mock false alerts ${((s.falseAlertRate || 0) * 100).toFixed(1)}%` : `Trained ${esc(a.trainedOn.slice(0, 16).replace('T', ' '))} in ${(a.durationMs / 1000).toFixed(1)}s`}</small></div></div>`;
+    }).join('')}</div>${ident ? `<button class="btn sm" data-act="page:tiIdentity" style="margin-top:12px">Open identity checks →</button>` : ''}`) : '';
+    const model = !m ? `<div class="ti-empty"><span class="ti-kic">${ICON.flask}</span><b>Payroll model not trained yet</b><p>${j ? `Last job: ${esc(j.status)}. ` : ''}Tick <b>Payroll</b> above and train to build it.</p></div>` : `
+      ${kpis([[ICON.chart, 'Active model', 'v' + m.modelVersion, cap(esc(m.detector.replace('_', ' ').toLowerCase())), 'violet'],
+        [ICON.users, 'Training records', m.trainingRecordCount.toLocaleString(), 'employee-months'],
+        [ICON.calendar, 'Training period', m.trainingPeriodStart.slice(0, 7), 'to ' + m.trainingPeriodEnd.slice(0, 7)],
+        [ICON.clock, 'Training time', j?.durationMs ? (j.durationMs / 1000).toFixed(1) + 's' : '—', cap(esc((j?.status || '').toLowerCase())), 'green']])}
+      ${panel('Detector evaluation', `Tested on ${ev.n_validation_rows} clean rows + ${ev.n_injected} injected anomalies · gate <b>${esc(j?.gate?.reason || 'passed')}</b>`,
+        `<div class="ti-dets">${Object.entries(d).map(([k, v]) => `<div class="ti-det ${k === ev.champion ? 'win' : ''}"><div class="ti-dh"><b>${esc(k.replace('_', ' ').toLowerCase())}</b>${k === ev.champion ? '<span class="ti-pill ok">✓ Chosen</span>' : ''}</div>
+          <div class="ti-dm"><small>Catches anomalies</small>${bar(v.recall_at_alert * 100, 'g')}<b>${(v.recall_at_alert * 100).toFixed(1)}%</b></div>
+          <div class="ti-dm"><small>False alerts</small>${bar(v.clean_alert_rate * 1000, 'r')}<b>${(v.clean_alert_rate * 100).toFixed(1)}%</b></div>
+          <div class="ti-dm"><small>ROC-AUC</small>${bar(v.roc_auc * 100)}<b>${v.roc_auc}</b></div></div>`).join('')}</div>`)}`;
+    const vers = T.versions.length ? `<div class="ti-vers">${T.versions.map((x) => `<div class="ti-ver ${x.status === 'ACTIVE' ? 'on' : ''}"><span class="ti-vdot"></span><b>v${x.modelVersion}</b>
+        <span class="ti-pill ${x.status === 'ACTIVE' ? 'ok' : x.status === 'REJECTED' ? 'bad' : ''}">${cap(esc(x.status.toLowerCase()))}</span><span class="cap">${esc(x.detector.replace('_', ' ').toLowerCase())}</span>
+        <span class="muted">${x.trainingRecordCount.toLocaleString()} records</span><span class="muted">${esc(x.trainingCompletedAt.slice(0, 16).replace('T', ' '))}</span>
+        ${x.status !== 'ACTIVE' && x.status !== 'REJECTED' ? `<button class="linkbtn" data-act="tiActivate:${x.modelId}">Roll back to this</button>` : '<span></span>'}</div>`).join('')}</div>` : '<p class="muted">No models yet.</p>';
+    return `${errBox()}${top}${pick}${prog ? panel(running ? 'Training in progress' : T.failed ? 'Training failed' : 'Last training run', '', prog) : ''}${others}<h3 class="ar-h">Payroll model</h3>${model}${panel('Payroll model versions', 'Every version is kept; roll back in one click.', vers)}`;
   }
 
   function anomalyBody() {
     lazy('runs', () => loadRuns());
     const a = T.analysis;
-    const res = !a ? '' : `<div class="kpis" style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:12px">
-        ${statCard(ICON.users, 'Checked', a.totalEmployees, 'employees in ' + esc(a.payrollPeriod))}
-        ${statCard(ICON.alert, 'Flagged', a.flaggedEmployees, a.anomalyCount + ' findings')}
-        ${statCard(ICON.shield, 'Highest severity', esc(a.maxSeverity || '—'), esc(a.status))}
-        ${statCard(ICON.chart, 'Model', a.modelVersion ? 'v' + a.modelVersion : 'none', 'ML ' + esc(a.mlStatus))}</div>
-      ${a.warnings.length ? `<p class="small muted">${a.warnings.map(esc).join('; ')}</p>` : ''}
-      <div class="card" style="margin-top:12px"><b>Findings</b><div class="tblwrap"><table class="g" style="margin-top:8px"><tr><th>Severity</th><th>Risk</th><th>Employee</th><th>Type</th><th>Finding</th><th>Current</th><th>Expected</th></tr>
-      ${a.anomalies.map((x) => `<tr><td><span class="tag ${SEV[x.severity] || 't-n'}">${x.severity}</span></td><td><b>${x.riskScore}</b></td><td>${esc(x.employeeNo)}</td>
-        <td>${esc(x.anomalyType.replaceAll('_', ' '))}<div class="small muted">${esc(x.source)}${x.ruleId ? ' · ' + esc(x.ruleId) : ''}</div></td>
-        <td>${esc(x.description)}<div class="small muted">→ ${esc(x.recommendedAction)}</div></td><td>${num(x.currentValue)}</td><td>${num(x.expectedValue)}</td></tr>`).join('')}</table></div></div>
-      <div class="card" style="margin-top:12px"><div class="ps-ih"><span class="kpi-ic">${ICON.bot}</span><b>Ask about these findings</b></div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0">${QUESTIONS.map((q, i) => `<button class="btn sm" data-act="tiAsk:${i}" ${T.busy ? 'disabled' : ''}>${esc(q)}</button>`).join('')}</div>
-        ${T.answer ? `<div class="small" style="white-space:pre-wrap"><span class="tag t-b">${esc(T.answer.status)}</span> ${esc(T.answer.answer)}</div>` : ''}</div>`;
-    return `${errBox()}<div class="card"><div class="ps-ih"><div><b>AI anomaly detection</b><div class="small muted">Rules + your company's model, checked against each employee's own pay history.</div></div></div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px">
-        <select id="tiRunSel" style="min-width:280px;padding:6px">${T.runs.map((r) => `<option value="${r.uid}" ${r.uid === T.run ? 'selected' : ''}>${esc(r.name)} · ${esc(r.period)} · ${r.records} employees</option>`).join('')}</select>
-        ${btn('tiAnalyze', 'Analyse pay run', true)}${T.ctx && !T.ctx.demo ? '' : btn('tiInject', '+ Test run with anomalies')}</div>
-      ${T.injected ? `<p class="small muted" style="margin-top:8px">Test run ${esc(T.injected.period)} created. Injected: ${T.injected.injected.map((i) => `<span class="tag t-n">${esc(i.employeeNo)} · ${esc(i.scenario)}</span>`).join(' ')}</p>` : ''}</div>${res}`;
+    const sevCount = (s) => (a ? a.anomalies.filter((x) => x.severity === s).length : 0);
+    const findings = !a ? '' : !a.anomalies.length
+      ? `<div class="ti-empty ok"><span class="ti-kic">✓</span><b>No anomalies found</b><p>All ${a.totalEmployees} employees in ${esc(a.payrollPeriod)} look consistent with their own pay history.</p></div>`
+      : `<div class="ti-finds">${a.anomalies.map((x) => `<div class="ti-find s-${x.severity}"><div class="ti-risk"><b>${x.riskScore}</b><small>risk</small></div>
+          <div class="ti-fb"><div class="ti-fh"><span class="ti-sev s-${x.severity}">${x.severity}</span><b>${esc(x.anomalyType.replaceAll('_', ' ').toLowerCase())}</b><span class="muted">· ${esc(x.employeeNo)} · ${esc(x.source.toLowerCase())}${x.ruleId ? ' ' + esc(x.ruleId) : ''}</span></div>
+          <p>${esc(x.description)}</p><p class="ti-act">→ ${esc(x.recommendedAction)}</p></div>
+          <div class="ti-vals"><small>Current</small><b>${num(x.currentValue)}</b><small>Expected</small><span>${num(x.expectedValue)}</span></div></div>`).join('')}</div>`;
+    const res = !a ? `<div class="ti-empty"><span class="ti-kic">${ICON.search}</span><b>Pick a pay run and click Analyse</b><p>Results appear here: every employee scored against their own history.</p></div>` : `
+      ${kpis([[ICON.users, 'Checked', a.totalEmployees, 'employees · ' + esc(a.payrollPeriod)],
+        [ICON.alert, 'Flagged', a.flaggedEmployees, a.anomalyCount + ' findings', a.flaggedEmployees ? 'red' : 'green'],
+        [ICON.shield, 'Highest severity', cap(esc(a.maxSeverity ? a.maxSeverity.toLowerCase() : 'none')), cap(esc(a.status.toLowerCase())), a.maxSeverity ? 'amber' : 'green'],
+        [ICON.chart, 'Model', a.modelVersion ? 'v' + a.modelVersion : 'rules only', cap(esc(a.mlStatus.replaceAll('_', ' ').toLowerCase())), 'violet']])}
+      ${a.warnings.length ? `<div class="ti-warn">${a.warnings.map(esc).join('<br>')}</div>` : ''}
+      ${panel('Findings', a.anomalies.length ? `Sorted by risk · ${['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'].map((s) => (sevCount(s) ? `<span class="ti-sev s-${s}">${sevCount(s)} ${s.toLowerCase()}</span>` : '')).join(' ')}` : '', findings)}
+      ${panel(`<span class="ti-kic sm">${ICON.bot}</span> Ask about these findings`, 'Read-only assistant: it explains, it never changes payroll.',
+        `<div class="ti-qs">${QUESTIONS.map((q, i) => `<button class="ti-q" data-act="tiAsk:${i}" ${T.busy ? 'disabled' : ''}>${esc(q)}</button>`).join('')}</div>
+        ${T.busy === 'tiAsk' ? '<div class="ti-ans muted">Thinking…</div>' : T.answer ? `<div class="ti-ans"><span class="ti-pill">${cap(esc(T.answer.status.toLowerCase()))}</span><span>${esc(T.answer.answer)}</span></div>` : ''}`)}`;
+    const ctl = `<div class="ti-ctl"><label><small>Pay run</small><select id="tiRunSel">${T.runs.map((r) => `<option value="${r.uid}" ${r.uid === T.run ? 'selected' : ''}>${esc(r.name)} · ${esc(r.period)} · ${r.records} employees</option>`).join('')}</select></label>
+        <button class="btn p ti-big" data-act="tiAnalyze" ${T.busy ? 'disabled' : ''}>${T.busy === 'tiAnalyze' ? 'Analysing…' : '✦ Analyse pay run'}</button>
+        ${T.ctx && !T.ctx.demo ? '' : `<button class="btn ti-big" data-act="tiInject" ${T.busy ? 'disabled' : ''}>${T.busy === 'tiInject' ? 'Creating…' : '+ Test run with anomalies'}</button>`}</div>
+      ${T.injected ? `<div class="ti-inj"><b>Test run ${esc(T.injected.period)} created.</b> Injected: ${T.injected.injected.map((i) => `<span class="ti-pill">${esc(i.employeeNo)} · ${cap(esc(i.scenario.replaceAll('_', ' ')))}</span>`).join(' ')}</div>` : ''}`;
+    return `${errBox()}${hero(ICON.spark, 'AI anomaly detection', 'Deterministic payroll rules + your company model, each employee checked against their own pay history.', '', 'blue')}
+      ${panel('Choose a pay run', '', ctl)}${res}`;
   }
 
 
@@ -141,6 +196,131 @@ export function intelligence({ S, render, openPage }) {
   .tp main{flex:1;min-width:0}.tp .top{background:#fff;border-bottom:1px solid #e5e7eb;padding:12px 24px;display:flex;justify-content:space-between;align-items:center}
   .tp .who{display:flex;align-items:center;gap:10px}.tp .av{width:32px;height:32px;border-radius:50%;background:#cbd5e1;display:grid;place-items:center;font-weight:700}
   .tp .content{padding:20px 24px}.tp .content h2{margin:0 0 14px;font-size:20px}
+  .ti-hero{display:flex;gap:16px;align-items:center;padding:20px 22px;border-radius:14px;color:#fff;background:linear-gradient(120deg,#4f46e5,#7c3aed 55%,#a855f7);box-shadow:0 8px 24px rgba(124,58,237,.18);margin-bottom:16px}
+  .ti-hero.blue{background:linear-gradient(120deg,#1d4ed8,#4f46e5 60%,#7c3aed)}.ti-hero h3{margin:0;font-size:18px;color:#fff}.ti-hero p{margin:3px 0 0;opacity:.92;font-size:13px}
+  .ti-hic{width:46px;height:46px;border-radius:12px;background:rgba(255,255,255,.18);display:grid;place-items:center;flex-shrink:0}.ti-hic svg{width:24px;height:24px}
+  .ti-ht{flex:1;min-width:0}.ti-hero .btn{background:#fff!important;color:#4f46e5!important;border-color:#fff!important}.ti-hero .ti-pill{background:rgba(255,255,255,.2);color:#fff;border-color:transparent}.ti-hero .ti-pill.ok{background:#dcfce7;color:#166534}
+  .ti-big{padding:9px 16px!important;font-size:13px!important;border-radius:9px!important;font-weight:600}
+  .ti-panel{background:#fff;border:1px solid #e5e7eb;border-radius:14px;padding:18px 20px;margin-bottom:16px;box-shadow:0 1px 2px rgba(16,24,40,.04)}
+  .ti-panel>header{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px}.ti-panel h4{margin:0;font-size:14.5px;display:flex;align-items:center;gap:8px}.ti-panel header p{margin:4px 0 0;color:#6b7280;font-size:12px}
+  .ti-pill{display:inline-flex;align-items:center;gap:4px;padding:2px 10px;border-radius:99px;font-size:11.5px;font-weight:600;background:#f3f4f6;color:#374151;border:1px solid #e5e7eb;white-space:nowrap}
+  .ti-pill.ok{background:#dcfce7;color:#166534;border-color:#bbf7d0}.ti-pill.bad{background:#fee2e2;color:#991b1b;border-color:#fecaca}
+  .ti-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-bottom:16px}
+  .ti-kpi{display:flex;gap:12px;align-items:center;background:#fff;border:1px solid #e5e7eb;border-radius:14px;padding:16px;--k:#2563eb;--ks:#eff6ff}
+  .ti-kpi.violet{--k:#7c3aed;--ks:#f5f3ff}.ti-kpi.green{--k:#16a34a;--ks:#f0fdf4}.ti-kpi.red{--k:#dc2626;--ks:#fef2f2}.ti-kpi.amber{--k:#d97706;--ks:#fffbeb}
+  .ti-kpi small{display:block;color:#6b7280;font-size:12px}.ti-kpi b{display:block;font-size:22px;line-height:1.15;color:#111827;white-space:nowrap}.ti-kpi>div{min-width:0}.ti-kpi em{font-style:normal;color:#6b7280;font-size:11.5px}
+  .ti-kic{width:40px;height:40px;border-radius:11px;background:var(--ks,#f5f3ff);color:var(--k,#7c3aed);display:grid;place-items:center;flex-shrink:0;font-weight:700;font-size:18px}.ti-kic svg{width:20px;height:20px}
+  .ti-kic.sm{width:26px;height:26px;border-radius:8px}.ti-kic.sm svg{width:15px;height:15px}
+  .ti-feats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-bottom:16px}.ti-feat{background:#fff;border:1px solid #e5e7eb;border-radius:14px;padding:18px}
+  .ti-feat b{display:block;margin:12px 0 4px;font-size:14px}.ti-feat p{margin:0;color:#6b7280;font-size:12.5px}
+  @media(max-width:900px){.ti-kpis,.ti-feats{grid-template-columns:repeat(2,minmax(0,1fr))}}
+  .ti-how{list-style:none;margin:0;padding:0;display:flex;gap:10px;flex-wrap:wrap}.ti-how li{flex:1;min-width:120px;display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;background:#f9fafb;font-weight:600}
+  .ti-how li span{width:24px;height:24px;border-radius:50%;background:#7c3aed;color:#fff;display:grid;place-items:center;font-size:12px;flex-shrink:0}
+  .ti-cta{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;padding:16px 20px;border-radius:14px;background:linear-gradient(135deg,#f5f3ff,#eef2ff);border:1px solid #ddd6fe}.ti-cta p{margin:0;color:#4c1d95}
+  .ti-cta .ti-big.p{background:#7c3aed;border-color:#7c3aed}
+  .ti-empty{text-align:center;padding:36px 20px;background:#fff;border:1px dashed #d1d5db;border-radius:14px;margin-bottom:16px}.ti-empty .ti-kic{margin:0 auto 10px}.ti-empty b{font-size:15px}.ti-empty p{margin:4px 0 0;color:#6b7280}
+  .ti-empty.ok{border:1px solid #bbf7d0;background:#f0fdf4;margin:0}.ti-empty.ok .ti-kic{--ks:#dcfce7;--k:#16a34a}
+  .ti-ctl{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap}.ti-ctl label{flex:1;min-width:260px}.ti-ctl small{display:block;color:#6b7280;margin-bottom:4px}
+  .ti-ctl select{width:100%;padding:9px 10px;border:1px solid #d1d5db;border-radius:9px;font-size:13px;background:#fff}
+  .ti-inj{margin-top:12px;padding:10px 12px;border-radius:10px;background:#f5f3ff;color:#4c1d95;display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+  .ti-warn{padding:10px 14px;border-radius:10px;background:#fffbeb;border:1px solid #fde68a;color:#92400e;margin-bottom:16px;font-size:12.5px}
+  .ti-sev{display:inline-block;padding:1px 8px;border-radius:99px;font-size:10.5px;font-weight:700;letter-spacing:.3px;color:#fff;background:#3b82f6}
+  .ti-sev.s-CRITICAL{background:#7f1d1d}.ti-sev.s-HIGH{background:#dc2626}.ti-sev.s-MEDIUM{background:#d97706}
+  .ti-finds{display:grid;gap:10px}.ti-find{display:flex;gap:14px;padding:14px;border:1px solid #e5e7eb;border-left:4px solid #3b82f6;border-radius:12px}
+  .ti-find.s-CRITICAL{border-left-color:#7f1d1d;background:#fef2f2}.ti-find.s-HIGH{border-left-color:#dc2626}.ti-find.s-MEDIUM{border-left-color:#d97706}
+  .ti-risk{width:52px;text-align:center;flex-shrink:0}.ti-risk b{display:block;font-size:22px}.ti-risk small{color:#6b7280;font-size:10.5px}
+  .ti-fb{flex:1;min-width:0}.ti-fh{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.ti-fh b{text-transform:capitalize}.ti-fb p{margin:6px 0 0}.ti-fb .ti-act{color:#4f46e5;font-size:12.5px}
+  .ti-vals{text-align:right;min-width:110px;display:grid;gap:1px;align-content:start}.ti-vals small{color:#6b7280;font-size:10.5px}.ti-vals b{font-size:15px}
+  .ti-qs{display:flex;gap:8px;flex-wrap:wrap}.ti-q{border:1px solid #ddd6fe;background:#f5f3ff;color:#5b21b6;border-radius:99px;padding:7px 14px;cursor:pointer;font-size:12.5px;font-weight:600}.ti-q:hover{background:#ede9fe}
+  .ti-ans{margin-top:12px;padding:12px 14px;border-radius:12px;background:#f9fafb;border:1px solid #e5e7eb;white-space:pre-wrap;display:flex;gap:8px;align-items:flex-start}
+  .ti-dets{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}.ti-det{border:1px solid #e5e7eb;border-radius:12px;padding:14px}.ti-det.win{border-color:#86efac;background:#f0fdf4}
+  .ti-dh{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}.ti-dh b{text-transform:capitalize}
+  .ti-dm{display:grid;grid-template-columns:120px 1fr 56px;align-items:center;gap:8px;padding:3px 0}.ti-dm small{color:#6b7280}.ti-dm b{text-align:right}
+  .ti-bar{height:8px;background:#e5e7eb;border-radius:99px;overflow:hidden}.ti-bar i{display:block;height:100%;background:#6366f1;border-radius:99px}.ti-bar.g i{background:#16a34a}.ti-bar.r i{background:#ef4444}
+  .ti-vers{display:grid;gap:2px}.ti-ver{display:grid;grid-template-columns:14px 60px 90px minmax(120px,1fr) 110px 130px 120px;gap:10px;align-items:center;padding:9px 6px;border-radius:8px}.ti-ver.on{background:#f0fdf4}
+  .ti-ver .cap{text-transform:capitalize}.ti-vdot{width:10px;height:10px;border-radius:50%;background:#d1d5db}.ti-ver.on .ti-vdot{background:#16a34a;box-shadow:0 0 0 4px #dcfce7}
+  .tr-spin{display:inline-block;width:28px;height:28px;border-radius:50%;border:3px solid #ede9fe;border-top-color:#7c3aed;animation:trspin .8s linear infinite;margin-bottom:8px}
+  .tp .db{display:grid;grid-template-columns:minmax(0,1fr);gap:20px;margin:0;padding:0;border:0;background:none}.tp .db-row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px}@media(max-width:760px){.tp .db-row{grid-template-columns:minmax(0,1fr)}}
+  .db-card{background:#fff;border:1px solid #e5e7eb;border-radius:14px;padding:20px 24px;box-shadow:0 1px 2px rgba(16,24,40,.04)}.db-card.p0{padding:0}.db-card a{color:#2563eb;cursor:pointer;font-weight:500}
+  .db-hello{border-left:4px solid #2563eb}.db-hello h2{margin:14px 0 6px;font-size:24px}.db-hello p{margin:0;color:#374151;line-height:1.7}
+  .db-wx{margin-top:18px;border:1px solid #e5e7eb;border-radius:12px;padding:16px 18px;background:#fbfcfe}.db-wt{display:flex;gap:12px;align-items:center}.db-wt>b{font-size:30px}
+  .db-wn{margin-top:14px;padding-top:12px;border-top:1px dashed #e5e7eb;color:#374151}
+  .db-h{display:flex;align-items:center;gap:12px;font-size:15px}.db-card.p0 .db-h{padding:18px 24px;border-bottom:1px solid #f0f1f3}.db-r{margin-left:auto;display:flex;gap:8px;align-items:center;color:#9ca3af}
+  .db-ic{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;background:#eff6ff;color:#2563eb;flex-shrink:0}.db-ic svg{width:17px;height:17px}
+  .db-ic.o{background:#fff7ed;color:#ea580c}.db-ic.g{background:#f0fdf4;color:#16a34a}.db-ic.v{background:#f5f3ff;color:#7c3aed}
+  .db-pill{padding:2px 9px;border-radius:99px;font-size:11.5px;border:1px solid}.db-pill.g{color:#15803d;border-color:#86efac;background:#f0fdf4}.db-pill.b{color:#2563eb;border-color:#bfdbfe;background:#eff6ff}
+  .db-work{display:flex;gap:24px;align-items:center;margin:18px 0}.db-ring{position:relative;width:92px;height:92px;flex-shrink:0}.db-ring svg{width:100%;height:100%}
+  .db-ring div{position:absolute;inset:0;display:grid;place-content:center;text-align:center}.db-ring b{font-size:15px}.db-ring small{color:#6b7280;font-size:10px}
+  .db-work dl{flex:1;margin:0;display:grid;grid-template-columns:1fr auto;row-gap:0}.db-work dt,.db-work dd{margin:0;padding:9px 0;border-bottom:1px dashed #e5e7eb}.db-work dt{color:#6b7280;font-size:12px;letter-spacing:.4px}.db-work dd{font-weight:600;text-align:right}
+  .db-week{display:grid;grid-template-columns:repeat(7,1fr);gap:8px;margin-bottom:16px}.db-week div{text-align:center;color:#6b7280}.db-week i{display:block;height:4px;border-radius:9px;background:#e5e7eb;margin-bottom:8px}
+  .db-week .done i{background:#2563eb}.db-week .now i{background:linear-gradient(90deg,#2563eb 25%,#e5e7eb 25%)}.db-week .now{color:#2563eb;font-weight:700}
+  .db-btn{border:0;border-radius:9px;padding:10px 18px;font-weight:600;cursor:pointer;font-size:13.5px}.db-btn.red{background:#dc2626;color:#fff}
+  .db-cnt{width:24px;height:24px;border-radius:50%;border:1px solid #bfdbfe;color:#2563eb;display:inline-grid;place-items:center;font-size:12px}
+  .db-tabs{display:flex;gap:6px;padding:12px 24px;border-bottom:1px solid #f0f1f3}.db-tabs span{padding:5px 12px;border-radius:8px;color:#6b7280}.db-tabs .on{background:#eff6ff;color:#2563eb;font-weight:600}
+  .db-ap{display:flex;gap:14px;align-items:center;padding:14px 24px;border-bottom:1px solid #f0f1f3}.db-ap>div{flex:1}.db-av{width:38px;height:38px;border-radius:50%;background:#eff6ff;color:#2563eb;border:1px solid #bfdbfe;display:grid;place-items:center;font-weight:700}
+  .db-tag{font-size:11px;padding:1px 7px;border-radius:5px;border:1px solid}.db-tag.o{color:#c2410c;border-color:#fdba74;background:#fff7ed}.db-tag.b{color:#2563eb;border-color:#93c5fd;background:#eff6ff}
+  .db-ok,.db-no{width:30px;height:30px;border:1px solid #e5e7eb;border-radius:8px;display:grid;place-items:center;cursor:pointer}.db-ok{color:#16a34a}.db-no{color:#dc2626}
+  .db-card footer{text-align:center;padding:14px}.db-an{display:flex;gap:14px;padding:18px 24px;border-bottom:1px solid #f0f1f3}.db-an p{margin:6px 0;color:#374151}
+  .db-seg{display:flex;background:#f3f4f6;border-radius:9px;padding:3px}.db-seg span{padding:5px 12px;border-radius:7px;color:#6b7280}.db-seg .on{background:#fff;color:#111827;font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.08)}
+  .db-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-top:18px}@media(max-width:900px){.db-kpis{grid-template-columns:repeat(2,1fr)}}
+  .db-kpi{position:relative;border:1px solid #e5e7eb;border-radius:12px;padding:18px 20px;--c:#2563eb}.db-kpi.g{--c:#15803d}.db-kpi.o{--c:#c2410c}.db-kpi.v{--c:#7c3aed}
+  .db-kpi>small:first-child{display:block;color:#6b7280}.db-kpi b{display:block;font-size:30px;color:var(--c);margin:4px 0}.db-ki{position:absolute;right:20px;top:46px;color:var(--c)}.db-ki svg{width:20px;height:20px}
+  .db-ln{display:flex;gap:12px;align-items:center;padding:13px 24px;cursor:pointer}.db-ln:hover{background:#f9fafb}.db-li{color:#2563eb;display:grid}.db-li svg{width:16px;height:16px}
+  .db-lv{padding:20px 24px;border-bottom:1px solid #f0f1f3}.db-lvh{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}.db-big{font-size:30px;font-weight:700}
+  .db-bar{height:6px;background:#e5e7eb;border-radius:9px;overflow:hidden;display:flex;margin:12px 0 8px}.db-bar i{background:#2563eb;display:block}.db-bar i.p{background:#bfdbfe}
+  .db-dot{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:3px}.db-dot.b{background:#2563eb}.db-dot.l{background:#bfdbfe}.db-dot.e{background:#e5e7eb}
+  .db-warn{margin-top:14px;padding:10px 14px;border-radius:10px;background:#fffbeb;border:1px solid #fde68a;color:#92400e}.db-lv2{padding:16px 24px;border-bottom:1px solid #f0f1f3}
+  .ag-chat{display:grid;gap:12px;background:#f8fafc}.ag-me{justify-self:end;max-width:75%;background:#2563eb;color:#fff;padding:12px 16px;border-radius:14px 14px 4px 14px}
+  .ag-card{background:#fff;border:1px solid #e5e7eb;border-radius:14px;padding:16px 18px}.ag-h{display:flex;gap:8px;align-items:center;margin-bottom:8px}.ag-h svg{width:18px;height:18px;color:#2563eb}.ag-h>span{margin-left:auto}
+  .ag-txt{white-space:pre-wrap;line-height:1.6}
+  .ag-trace{border:1px solid #e5e7eb;border-radius:10px;padding:8px 12px;margin-bottom:12px;background:#fbfcfe}.ag-trace summary{cursor:pointer;color:#15803d}
+  .ag-trace div{display:grid;grid-template-columns:150px 1fr;gap:2px 10px;padding:6px 0;border-top:1px dashed #eef0f3;margin-top:6px}.ag-trace em{grid-column:2;font-style:normal;color:#6b7280;font-size:12px}
+  .ag-trace code,.ag-tools code{font-size:11.5px;color:#4f46e5}
+  .ag-score{display:flex;gap:16px;align-items:center;border:1px solid #e5e7eb;border-radius:12px;padding:14px 16px;margin-bottom:12px}.ag-score h3{margin:2px 0;font-size:19px}
+  .ag-ring{position:relative;width:72px;height:72px;flex-shrink:0}.ag-ring svg{width:100%;height:100%}.ag-ring b{position:absolute;inset:0;display:grid;place-items:center;font-size:20px}
+  .ag-t{width:100%;border-collapse:collapse;font-size:12.5px;min-width:720px}.ag-t th{background:#f3f6fa;color:#6b7280;text-align:left;padding:8px;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em}
+  .ag-t td{padding:10px 8px;border-bottom:1px solid #eef0f3;vertical-align:top}.ag-t tr.ag-g td{background:#eef4ff;text-transform:capitalize}.ag-t tr.done td{opacity:.55}
+  .ag-t td div{margin-top:3px}.ag-k{font-size:10px;font-weight:700;color:#6b7280;letter-spacing:.06em;margin-right:4px}.ag-risk{font-weight:700;white-space:nowrap}
+  .ag-note{margin-top:12px;padding:10px 14px;border-radius:10px;background:#f0fdf4;border:1px solid #bbf7d0;color:#166534}
+  .ag-rev{border-color:#c7d2fe;box-shadow:0 0 0 3px #eef2ff}.ag-opts{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:6px 0 8px}.ag-opts .btn.on{outline:2px solid #16a34a}
+  .ag-sugg{display:flex;gap:8px;flex-wrap:wrap}.ag-in{display:flex;gap:10px}.ag-in input{flex:1;padding:11px 14px;border:1px solid #d1d5db;border-radius:10px;font-size:13.5px;background:#fff}
+  .ag-tools div{display:grid;grid-template-columns:160px 1fr;gap:10px;padding:8px 0;border-top:1px solid #f0f1f3}.ag-ul{margin:0;padding-left:18px;line-height:1.8}
+  .ag-sum{display:flex;gap:12px;align-items:center;padding:12px 14px;border-radius:12px;background:linear-gradient(135deg,#eef2ff,#f5f3ff);border:1px solid #e0e7ff;margin-bottom:12px}
+  .ag-sum.ok{background:linear-gradient(135deg,#f0fdf4,#ecfdf5);border-color:#bbf7d0}.ag-sum.no{background:#fff7ed;border-color:#fed7aa}
+  .ag-sum b{display:block;font-size:14px;text-transform:none}.ag-sum small{display:block;color:#6b7280;margin-top:2px}
+  .ag-si{width:36px;height:36px;border-radius:10px;background:#fff;display:grid;place-items:center;font-size:18px;box-shadow:0 1px 2px rgba(0,0,0,.06);flex-shrink:0}
+  .ag-fl{display:grid;gap:10px}.ag-f{border:1px solid #e5e7eb;border-left:4px solid #3b82f6;border-radius:12px;padding:14px 16px;background:#fff}
+  .ag-f.s-CRITICAL{border-left-color:#7f1d1d}.ag-f.s-HIGH{border-left-color:#dc2626}.ag-f.s-MEDIUM{border-left-color:#d97706}
+  .ag-fh{display:flex;gap:12px;align-items:flex-start}.ag-fh>div:nth-child(2){flex:1;min-width:0}.ag-fh b{font-size:14px;text-transform:capitalize}
+  .ag-fi{width:32px;height:32px;border-radius:9px;background:#fef2f2;display:grid;place-items:center;flex-shrink:0}.ag-f.s-MEDIUM .ag-fi{background:#fffbeb}.ag-f.s-LOW .ag-fi{background:#eff6ff}
+  .ag-fm{display:flex;gap:6px;flex-wrap:wrap;margin-top:5px}.ag-chip{font-size:11px;padding:1px 8px;border-radius:99px;background:#f3f4f6;color:#374151}
+  .ag-amt{text-align:right}.ag-amt small{display:block;color:#6b7280;font-size:10.5px}.ag-amt b{font-size:17px;color:#b91c1c}
+  .ag-fd{margin:10px 0;color:#374151;line-height:1.55}
+  .ag-cmp{display:grid;grid-template-columns:1fr auto;gap:6px 14px;align-items:center;padding:10px 12px;background:#f9fafb;border-radius:10px}
+  .ag-cmp>div{display:grid;grid-template-columns:62px 1fr 90px;gap:10px;align-items:center;grid-column:1}.ag-cmp small{color:#6b7280}.ag-cmp b{text-align:right}
+  .ag-cb{height:8px;background:#e5e7eb;border-radius:99px;overflow:hidden;display:block}.ag-cb i{display:block;height:100%;border-radius:99px;background:#3b82f6}
+  .ag-cb i.e{background:#94a3b8}.ag-cb i.e2{background:#6366f1}.ag-cb i.s-CRITICAL{background:#7f1d1d}.ag-cb i.s-HIGH{background:#dc2626}.ag-cb i.s-MEDIUM{background:#d97706}
+  .ag-delta{grid-column:2;grid-row:1/3;font-weight:700;padding:4px 10px;border-radius:99px;font-size:12.5px}.ag-delta.up{background:#fef2f2;color:#b91c1c}.ag-delta.down{background:#eff6ff;color:#1d4ed8}
+  .ag-fix{display:flex;gap:10px;margin-top:10px;padding:10px 12px;border-radius:10px;background:#eef2ff;color:#3730a3}.ag-fix small{display:block;font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#6366f1}
+  .ag-bars{display:grid;gap:8px;margin-bottom:12px}.ag-bars>div{display:grid;grid-template-columns:200px 1fr 40px;gap:12px;align-items:center}.ag-bars span:first-child{text-transform:capitalize}.ag-bars b{text-align:right}
+  .ag-li{margin:0;padding:0;list-style:none;display:grid;gap:6px}.ag-li li{padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;background:#fff}
+  .ag-dir td:first-child{display:flex;gap:10px;align-items:center}.ag-dir small{display:block}.db-av.sm{width:30px;height:30px;font-size:11px;flex-shrink:0}
+  .ag-spark{display:flex;gap:8px;align-items:flex-end;height:120px;padding:10px 6px 0;border-bottom:1px solid #e5e7eb}.ag-spark>div{flex:1;display:flex;flex-direction:column;align-items:center;height:100%;justify-content:flex-end}
+  .ag-spark span{width:100%;max-width:34px;background:#c7d2fe;border-radius:6px 6px 0 0;display:flex;align-items:flex-end;overflow:hidden}.ag-spark i{display:block;width:100%;background:#4f46e5}
+  .ag-spark small{font-size:10px;color:#6b7280;margin-top:4px}
+  .ag-kp{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.ag-kp>div{border:1px solid #e5e7eb;border-radius:12px;padding:12px 14px;background:#fff}.ag-kp small{display:block;color:#6b7280}.ag-kp b{display:block;font-size:18px;margin:2px 0}
+  .ag-mv{display:grid;grid-template-columns:1fr auto auto;gap:14px;align-items:center;padding:10px 14px;border:1px solid #e5e7eb;border-radius:10px;background:#fff}.ag-mv small{display:block}.ag-mv .ag-delta{grid-column:auto;grid-row:auto}
+  .ag-txt a{color:#2563eb}
+  .ar-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:12px}
+  .ar-card{display:flex;gap:12px;align-items:flex-start;padding:14px;border:1.5px solid #e5e7eb;border-radius:12px;cursor:pointer;background:#fff;transition:all .15s}
+  .ar-card:hover{border-color:#c4b5fd}.ar-card.on{border-color:#7c3aed;background:#faf5ff;box-shadow:0 0 0 3px #ede9fe}
+  .ar-cb{width:20px;height:20px;border-radius:6px;border:2px solid #d1d5db;display:grid;place-items:center;font-size:12px;font-weight:700;color:#fff;flex-shrink:0;margin-top:2px}
+  .ar-card.on .ar-cb{background:#7c3aed;border-color:#7c3aed}.ar-ic{font-size:22px;line-height:1}.ar-tx{display:grid;gap:4px;min-width:0}.ar-tx small{color:#6b7280;font-size:12px}
+  .ar-tx .ti-pill{justify-self:start}.ar-demo{justify-self:start;display:inline-block;font-size:10px;font-weight:700;color:#92400e;background:#fef3c7;border-radius:4px;padding:1px 6px;vertical-align:middle}
+  .ar-run{display:grid;gap:8px;margin-top:14px}.ar-row{display:grid;grid-template-columns:28px 24px 120px 1fr auto;gap:10px;align-items:center;padding:8px 12px;border:1px solid #e5e7eb;border-radius:10px}
+  .ar-row small{color:#6b7280}.ar-row em{font-style:normal;color:#6b7280;font-size:12px}.ar-row.ok .tr-ic{background:#16a34a;color:#fff;border-color:#16a34a}.ar-row.bad .tr-ic{background:#dc2626;color:#fff;border-color:#dc2626}
+  .ar-row.run .tr-ic{border:3px solid #ede9fe;border-top-color:#7c3aed;background:#fff;animation:trspin .8s linear infinite}
+  .ar-sum{display:flex;gap:12px;padding:14px;border:1px solid #e5e7eb;border-radius:12px}.ar-sum small{display:block;color:#6b7280;margin-top:3px}.ar-h{margin:6px 0 12px;font-size:15px}
   .tr-wrap{display:flex;gap:28px;align-items:center;margin-top:14px;flex-wrap:wrap}.tr-ring{position:relative;width:140px;height:140px;flex-shrink:0}
   .tr-ring svg{width:100%;height:100%}.tr-arc{transition:stroke-dashoffset 1.1s ease}.tr-mid{position:absolute;inset:0;display:grid;place-content:center;text-align:center}
   .tr-mid b{font-size:28px;line-height:1}.tr-mid small{color:#6b7280;font-size:11px;margin-top:4px}
@@ -156,8 +336,8 @@ export function intelligence({ S, render, openPage }) {
   const STATIC = { 'BASIC v5': ['Dashboard', 'Company Policy'], PRODUCT: ['EPM', 'Pay', 'Leave', 'IRAS', 'Claim', 'Query Builder'] };
   function shell(crumb, body, groups, active) {
     document.body.classList.add('tp-mode');
-    const on = !!T.sub?.subscribed, trained = !!T.status?.activeModel;
-    if (on && !trained && T.status && active !== 'tiTrain' && active !== 'tiOnboard') return shell(crumb, onboardBody(), groups, 'tiOnboard');
+    const on = !!T.sub?.subscribed, trained = anyTrained();
+    if (on && !trained && T.status && !['tiTrain', 'tiOnboard', 'tiDash'].includes(active)) return shell(crumb, onboardBody(), groups, 'tiOnboard');
     const item = (it) => `<a class="it ${it.k === active ? 'on' : ''}" data-act="${it.act}">${ICON[it.icon] || DOT}<span>${esc(it.label)}</span>${it.count ? `<span class="n">${it.count}</span>` : ''}</a>`;
     const ti = on && !trained ? `<div class="sub">Get started</div>${item({ k: 'tiTrain', label: 'Train your model', icon: 'flask', act: 'page:tiTrain' })}<button class="tpbtn out" data-act="tiUnsubscribe" ${T.busy ? 'disabled' : ''}>Unsubscribe</button>`
       : on ? groups.map((g) => `<div class="sub">${esc(g.label)}</div>${g.items.map(item).join('')}`).join('')
@@ -165,43 +345,433 @@ export function intelligence({ S, render, openPage }) {
       : `<div class="subbox"><b>Times Intelligence</b><p>PayShield pay run assurance and ML anomaly detection trained on your own payroll.</p><button class="tpbtn" data-act="tiSubscribe" ${T.busy ? 'disabled' : ''}>${T.busy === 'tiSubscribe' ? 'Subscribing…' : 'Subscribe to Times Intelligence'}</button></div>`;
     const title = (crumb.match(/<b>(.*?)<\/b>/) || [, crumb])[1];
     return `<div class="tp"><aside><div class="co"><i></i>${esc(T.ctx?.companyName || 'CARLTON HOTEL (SINGAPORE) PTE LTD')}</div>
-      ${Object.entries(STATIC).map(([h, xs]) => `<div class="${h === 'PRODUCT' ? 'sec' : 'plan'}">${h}</div>${xs.map((x) => `<a class="it dim">${DOT}<span>${x}</span></a>`).join('')}`).join('')}
+      ${Object.entries(STATIC).map(([h, xs]) => `<div class="${h === 'PRODUCT' ? 'sec' : 'plan'}">${h}</div>${xs.map((x) => x === 'Dashboard' ? `<a class="it ${active === 'tiDash' ? 'on' : ''}" data-act="page:tiDash">${ICON.home}<span>${x}</span></a>` : `<a class="it dim">${DOT}<span>${x}</span></a>`).join('')}`).join('')}
       <div class="sec ti">TIMES INTELLIGENCE <span class="new">NEW</span></div>${ti}
       <div class="ft">Times Portal · ${esc(T.ctx?.database || 'prod-is-down')} · <button data-act="resetRun">reset demo data</button></div></aside>
       <main><div class="top"><div><div style="color:#6b7280">Welcome back, Thilanka Potter!</div><b>October, 2026</b></div>
       <div class="who"><span class="av">TP</span><div><b>Thilanka Potter</b><div style="color:#6b7280;font-size:11px">Payroll Admin</div></div></div></div>
-      <div class="content"><h2>${!on ? 'Times Intelligence' : active === 'tiOnboard' ? 'Welcome to Times Intelligence' : title}</h2>${on || active === 'tiSubscribe' ? (on && !T.status ? '<div class="card muted">Checking your company model…</div>' : body) : subscribeBody()}</div></main></div>`;
+      <div class="content"><h2>${active === 'tiDash' ? '' : !on ? 'Times Intelligence' : active === 'tiOnboard' ? 'Welcome to Times Intelligence' : title}</h2>${active === 'tiDash' ? body : on || active === 'tiSubscribe' ? (on && !T.status ? '<div class="card muted">Checking your company model…</div>' : body) : subscribeBody()}</div></main></div>`;
+  }
+
+  /* ---------- portal dashboard (mock data, look-alike of the Times portal home) ---------- */
+  function dashBody() {
+    const d = new Date(), hr = d.getHours(), greet = hr < 12 ? 'Good morning' : hr < 18 ? 'Good afternoon' : 'Good evening';
+    const C = 2 * Math.PI * 34, worked = 13.25;
+    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'], today = (d.getDay() + 6) % 7;
+    const appr = [['DT', 'Daniel Tan', 'Leave', 'Annual leave · 13–15 Oct (3 days)'], ['SC', 'Shalini Chandran', 'Leave', 'Half day (PM) · 9 Oct'], ['KL', 'Kevin Lim', 'Claim', 'S$248.60 · Client lunch']];
+    const kp = [['Headcount', '248', '+6.4% vs last period', ICON.users, 'b'], ['New hires', '9', '2 starting this month', ICON.users, 'g'],
+      ['Attrition', '1.3%', '-0.4% vs last period', ICON.users, 'o'], ['Open roles', '12', '5 in final interviews', ICON.building || ICON.wallet, 'v']];
+    const links = [['Apply Leave', ICON.calendar], ['Submit Claim', ICON.receipt], ['My Payslips', ICON.wallet], ['Timesheet', ICON.clock], ['Employee Directory', ICON.users]];
+    const head = (ic, t, right = '', tone = 'b') => `<header class="db-h"><span class="db-ic ${tone}">${ic}</span><b>${t}</b><span class="db-r">${right}</span></header>`;
+    return `<div class="db">
+    <div class="db-row r1">
+      <section class="db-card db-hello"><small class="muted">📅 ${d.toLocaleDateString('en-SG', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</small>
+        <h2>${greet}, Thilanka Potter</h2><p>You have <b>5 pending approvals</b> and <b>2 events</b> coming up this week.<br>8 people are out today.</p>
+        <div class="db-wx"><div class="db-wt"><span style="font-size:34px">⛅</span><b>31°</b><span>Partly cloudy<br><small class="muted">📍 Singapore · H 32° L 26°</small></span></div>
+          <div class="db-wn">☂ Thunderstorms expected around 6 PM. Bring an umbrella.</div></div></section>
+      <section class="db-card">${head(ICON.clock, 'My Workday', '<span class="db-pill g">Clocked in</span>')}
+        <div class="db-work"><div class="db-ring"><svg viewBox="0 0 80 80"><circle cx="40" cy="40" r="34" stroke="#2563eb" stroke-width="6" fill="none" stroke-dasharray="${C}" stroke-dashoffset="${C * (1 - Math.min(1, worked / 9))}" transform="rotate(-90 40 40)"/></svg><div><b>13h 15m</b><small>of 9h 00m</small></div></div>
+          <dl><dt>CLOCK IN</dt><dd>09:02 AM</dd><dt>SHIFT</dt><dd>9:00 – 18:00</dd><dt>THIS WEEK</dt><dd>36h 10m</dd></dl></div>
+        <div class="db-week">${days.map((x, i) => `<div class="${i < today ? 'done' : i === today ? 'now' : ''}"><i></i><span>${x}</span></div>`).join('')}</div>
+        <div style="text-align:right"><button class="db-btn red">⇥ Clock out</button></div></section>
+    </div>
+    <div class="db-row">
+      <section class="db-card p0">${head(ICON.library || ICON.receipt, 'Pending Approvals', '<span class="db-cnt">5</span> <a>View all</a>')}
+        <div class="db-tabs"><span class="on">All · 5</span><span>Leave · 2</span><span>Claims · 2</span><span>OT · 1</span></div>
+        ${appr.map(([i, n, t, s]) => `<div class="db-ap"><span class="db-av">${i}</span><div><b>${n}</b><div><span class="db-tag ${t === 'Claim' ? 'b' : 'o'}">${t}</span> <small class="muted">${s}</small></div></div><span class="db-ok">✓</span><span class="db-no">✕</span></div>`).join('')}
+        <footer><a>+2 more pending</a></footer></section>
+      <section class="db-card p0">${head('📣', 'Announcements', '', 'o')}
+        <div class="db-an"><span class="db-ic b">📣</span><div><b>Q4 Town Hall on 14 Oct</b> <span class="db-pill b">📌 Pinned</span><p>Join the CEO for the quarterly update, followed by Q&amp;A. Level 12 auditorium or via Teams.</p><small class="muted">HR Team · 23 Oct 2026</small></div></div>
+        <div class="db-an"><span class="db-ic b">${ICON.shield}</span><div><b>2027 medical benefits enrolment opens</b><p>Review your coverage and add dependants before 31 Oct. New dental plan options are now available.</p><small class="muted">Benefits · 22 Oct 2026</small></div></div>
+        <footer><a>View all announcements</a></footer></section>
+    </div>
+    <section class="db-card">${head(ICON.chart, 'HR Analytics', '<span class="db-seg"><span>3M</span><span>6M</span><span class="on">12M</span></span>')}
+      <div class="db-kpis">${kp.map(([l, v, s, ic, t]) => `<div class="db-kpi ${t}"><small>${l}</small><b>${v}</b><span class="db-ki">${ic}</span><small class="muted">${s}</small></div>`).join('')}</div></section>
+    <div class="db-row">
+      <section class="db-card p0">${head('🔗', 'Quick Links', '<a>Edit</a>', 'v')}${links.map(([l, ic]) => `<div class="db-ln"><span class="db-li">${ic}</span>${l}<span class="db-r">›</span></div>`).join('')}</section>
+      <section class="db-card p0">${head('✈', 'My Leave Balance', '<a>Apply leave</a>', 'g')}
+        <div class="db-lv"><div class="db-lvh"><b>Annual leave</b><small class="muted">2026</small></div><div><span class="db-big">12</span> <span class="muted">of 18 days left</span></div>
+          <div class="db-bar"><i style="width:22%"></i><i class="p" style="width:11%"></i></div>
+          <small><span class="db-dot b"></span>Taken <b>4</b> &nbsp; <span class="db-dot l"></span>Pending <b>2</b> &nbsp; <span class="db-dot e"></span>Available <b>12</b></small>
+          <div class="db-warn">⏱ Use 4 days by 31 Dec 2026 or they’ll expire</div></div>
+        ${[['Medical leave', 11, 14], ['Childcare leave', 4, 6]].map(([n, l, t]) => `<div class="db-lv2"><div class="db-lvh"><span>${n}</span><span><b>${l}</b> <small class="muted">/ ${t} days left</small></span></div><div class="db-bar"><i style="width:${(t - l) / t * 100}%"></i></div></div>`).join('')}</section>
+    </div></div>`;
+  }
+
+  /* ---------- PayShield Agent (real): fixed read-only tools on the Times Intelligence API, no LLM-written SQL ---------- */
+  const A = (T.ag = { msgs: [], analysis: null, review: -1, demo: false });
+  const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+  const SEV_W = { CRITICAL: 8, HIGH: 4, MEDIUM: 2, LOW: 1 };
+  const RESOLVED = ['EXPECTED_CHANGE', 'FALSE_POSITIVE'];
+  const OUTCOMES = [['CONFIRMED_ERROR', 'Confirm error', 'p'], ['EXPECTED_CHANGE', 'Expected change', ''], ['FALSE_POSITIVE', 'False alarm', ''], ['NEEDS_INVESTIGATION', 'Investigate later', '']];
+  const isRunAsk = (q) => /(check|analy[sz]e|review|audit|scan|validate|verify|go through)/i.test(q) && /(pay ?run|payroll|pay score|month|run|latest|this|last|\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec))/i.test(q);
+  const atRisk = (x) => (/hour/i.test(x.metric || '') || x.currentValue == null || x.expectedValue == null ? 0 : Math.abs(x.currentValue - x.expectedValue));
+  const open = (a) => a.anomalies.filter((x) => !RESOLVED.includes(x.latestFeedback));
+
+  function payScore(a) {
+    const o = open(a), flagged = new Set(o.map((x) => x.employeeNo)).size;
+    const clean = a.totalEmployees ? 1 - flagged / a.totalEmployees : 1;
+    const penalty = Math.min(40, o.reduce((s, x) => s + (SEV_W[x.severity] || 1), 0));
+    const blocking = o.some((x) => x.severity === 'CRITICAL' || x.severity === 'HIGH');
+    let score = Math.max(0, Math.round(100 * clean - penalty));
+    if (blocking) score = Math.min(score, 79);
+    const verdict = score >= 90 ? 'Ready' : score >= 80 ? 'Review' : 'Not ready';
+    return { score, verdict, flagged, blocking, risk: o.reduce((s, x) => s + atRisk(x), 0), open: o.length };
+  }
+
+  function pickRun(q) {
+    const t = q.toLowerCase();
+    const mi = MONTHS.findIndex((m) => new RegExp(`\\b${m}`).test(t));
+    const y = (t.match(/\b(20\d\d)\b/) || [])[1];
+    if (mi >= 0) {
+      const mm = String(mi + 1).padStart(2, '0');
+      const r = T.runs.find((x) => x.period.startsWith(mm + '/') && (!y || x.period.endsWith(y)));
+      if (r) return r;
+    }
+    return T.runs.find((x) => x.uid === T.run) || T.runs[0];
+  }
+
+  const say = (m) => { A.msgs.push(m); render(); setTimeout(() => document.querySelector('.ag-end')?.scrollIntoView({ block: 'end', behavior: 'smooth' }), 30); };
+  async function tool(steps, name, label, fn) {
+    const t0 = performance.now(); const out = await fn();
+    steps.push({ name, label, ms: Math.round(performance.now() - t0), out: typeof out === 'string' ? out : '' });
+    return out;
+  }
+
+  async function runCheck(q) {
+    const steps = [];
+    if (!isTrained('PAYROLL')) {
+      if (isTrained('IDENTIFICATION')) return identityAnswer(steps);
+      return say({ who: 'agent', kind: 'text', steps, src: 'error', text: 'The Payroll area is not trained yet. Train it on the Train model page to check pay runs.' });
+    }
+    if (!T.runs.length) await tool(steps, 'payrun.list', 'List pay runs for this company', loadRuns);
+    const run = pickRun(q);
+    if (!run) throw new Error('No pay runs found for this company.');
+    steps.push({ name: 'payrun.read', label: `Read ${run.name} (${run.period})`, ms: 0, out: `${run.records} pay records` });
+    const a = await tool(steps, 'payroll.analyze', 'Rules + company model on every employee vs their own history',
+      () => api('/api/v1/payroll/analyze', { method: 'POST', body: JSON.stringify({ payRunId: run.uid }) }));
+    steps[steps.length - 1].out = `${a.anomalyCount} findings · ${a.flaggedEmployees}/${a.totalEmployees} employees · model ${a.modelVersion ? 'v' + a.modelVersion : 'none'} (${a.mlStatus.toLowerCase()})`;
+    const p = payScore(a);
+    steps.push({ name: 'payscore.compute', label: 'Compute the Pay Score', ms: 0, out: `${p.score}/100 · ${p.verdict}` });
+    let identity = null;
+    if (isTrained('IDENTIFICATION')) {
+      identity = await tool(steps, 'identity.check', 'Identification checks (NRIC/FIN, bank accounts, work passes, changes since training)', () => api('/api/v1/identity/check'));
+      steps[steps.length - 1].out = `${identity.findingCount} identity finding(s) on ${identity.flaggedEmployees} employee(s)`;
+    }
+    A.analysis = a; T.analysis = a; T.run = run.uid; A.review = -1;
+    say({ who: 'agent', kind: 'report', steps, at: new Date(), identity });
+  }
+
+  /* ---------- lookup tools: fixed read-only queries on the AI service (no LLM, no generated SQL) ---------- */
+  const qs = (o) => Object.entries(o).filter(([, v]) => v != null && v !== '').map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
+  const money = (v) => (v == null ? '—' : 'S$' + Number(v).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 }));
+  const RULE_WORDS = /\b(cpf|iras|mom|sdl|levy|tax|ir8a|prorat|entitle|ceiling|share award|bonus rule|aws|annual wage|notice|overtime rule|work pass|ep |s pass|skillsfuture|nsman|maternity|paternity|childcare leave)\b/i;
+
+  async function identityAnswer(steps) {
+    const r = await tool(steps, 'identity.check', 'Identification checks (NRIC/FIN, bank accounts, work passes, changes since training)', () => api('/api/v1/identity/check'));
+    steps[steps.length - 1].out = `${r.findingCount} finding(s)`;
+    T.ident = r;
+    return say({ who: 'agent', kind: 'findings', steps, src: 'identity', items: r.findings, emp: null,
+      title: r.findingCount ? `${r.findingCount} identity issue${r.findingCount > 1 ? 's' : ''} on ${r.flaggedEmployees} employee${r.flaggedEmployees > 1 ? 's' : ''}` : `No identity issues across ${r.employees.toLocaleString()} employees`,
+      empty: 'Every employee has a unique NRIC/FIN and bank account, valid work passes, and nothing changed since training.' });
+  }
+
+  async function lookupIntent(q, steps) {
+    const t = q.toLowerCase();
+    if (/(identit|identification|nric|\bfin\b|work ?pass|bank account|ghost|duplicate (employee|id)|shared (bank|account|phone))/i.test(q)) {
+      if (!isTrained('IDENTIFICATION')) return { who: 'agent', kind: 'text', steps, src: 'error', text: 'The Identification area is not trained yet. Tick Identification on the Train model page and train it.' };
+      await identityAnswer(steps);
+      return { skip: true };
+    }
+    const emp = (q.match(/\b[A-Z]{1,3}\d{3,}\b/i) || [])[0];
+    if (emp && /(history|last \d+|months|pay of|salary|payslip|earn|paid|trend)/i.test(q) && !/(why|flag|anomal|finding|wrong)/i.test(q)) {
+      const months = +(t.match(/last (\d+)/) || [])[1] || 6;
+      const h = await tool(steps, 'employee.payHistory', `Pay history for ${emp.toUpperCase()} (${months} months)`, () => api(`/api/v1/lookup/employees/${encodeURIComponent(emp)}/pay-history?months=${months}`));
+      steps[steps.length - 1].out = `${h.history.length} pay records`;
+      return { who: 'agent', kind: 'history', steps, src: 'lookup', data: h };
+    }
+    if (/(compare|vs\.?|versus|difference|changed|change[sd]? (from|since)|biggest change|moved)/i.test(q)) {
+      const c = await tool(steps, 'payrun.compare', 'Compare the latest pay run with the previous one', () => api(`/api/v1/lookup/pay-runs/compare?top=10`));
+      steps[steps.length - 1].out = `${c.current.name} vs ${c.previous.name}`;
+      return { who: 'agent', kind: 'compare', steps, src: 'lookup', data: c };
+    }
+    if (/(total|gross|payroll cost|how much (did|do) we pay|wage bill|cost of|run summary|pay run summary|trend)/i.test(q) && !RULE_WORDS.test(q)) {
+      const n = +(t.match(/last (\d+)/) || [])[1] || 6;
+      const r = await tool(steps, 'payrun.totals', `Totals for the last ${n} pay runs`, () => api(`/api/v1/lookup/pay-runs/totals?limit=${n}`));
+      steps[steps.length - 1].out = `${r.runs.length} pay runs`;
+      return { who: 'agent', kind: 'totals', steps, src: 'lookup', data: r.runs };
+    }
+    if (/^\s*(find|search|look ?up)\b/i.test(q) || (/(list|show|all|find|search|who are|directory|headcount|how many employees|staff|people)/i.test(q) && /(employee|staff|people|headcount|directory|worker)/i.test(q) && !/(overtime|flag|anomal|finding)/i.test(q))) {
+      const term = (q.match(/(?:named|called|name|search|find|matching|like)\s+["']?([\w .-]{2,40})/i) || [])[1] || (emp || '');
+      const r = await tool(steps, 'employee.directory', term ? `Search employees for “${term}”` : 'Employee directory', () => api(`/api/v1/lookup/employees?${qs({ q: term.trim(), limit: 25 })}`));
+      steps[steps.length - 1].out = `${r.total} employee(s)`;
+      return { who: 'agent', kind: 'directory', steps, src: 'lookup', data: r, term };
+    }
+    if (RULE_WORDS.test(q) || /^(how|what|when|is|are|do|does|can)\b/i.test(q.trim())) {
+      const kb = await import('./kb.js');
+      const hit = kb.search(q, 1)[0];
+      if (hit && hit.score > 4 && RULE_WORDS.test(q + ' ' + hit.entry.k)) {
+        steps.push({ name: 'rules.knowledge', label: 'Search the rule knowledge base (CPF, IRAS, MOM)', ms: 0, out: hit.entry.id });
+        return { who: 'agent', kind: 'rule', steps, src: 'knowledge', data: hit.entry };
+      }
+    }
+    return null;
+  }
+
+  function lookupHtml(m) {
+    const d = m.data;
+    if (m.kind === 'directory') {
+      return `<div class="ag-sum"><span class="ag-si">👥</span><div><b>${d.total.toLocaleString()} employee${d.total === 1 ? '' : 's'}${m.term ? ` matching “${esc(m.term)}”` : ' in this company'}</b><small>${d.total > d.employees.length ? `Showing the first ${d.employees.length}. Ask “find &lt;name or number&gt;” to narrow it down.` : 'Latest pay shown for each'}</small></div></div>
+        <div class="tblwrap"><table class="ag-t ag-dir"><tr><th>Employee</th><th>Hired</th><th>Last pay run</th><th>Basic</th><th>Net pay</th></tr>
+        ${d.employees.map((e) => `<tr><td><span class="db-av sm">${esc((e.name || '?').split(' ').pop().slice(0, 2))}</span><div><b>${esc(e.employee_no)}</b><small class="muted">${esc(e.name)}</small></div></td>
+          <td>${esc(String(e.hired || '').slice(0, 10))}</td><td>${esc(e.last_period || '—')}</td><td>${money(e.basic)}</td><td><b>${money(e.net)}</b></td></tr>`).join('')}</table></div>`;
+    }
+    if (m.kind === 'history') {
+      const h = [...d.history].reverse(), max = Math.max(1, ...h.map((x) => +x.gross || +x.net || 0));
+      const last = d.history[0], prev = d.history[1];
+      const ch = last && prev && +prev.net ? ((last.net - prev.net) / prev.net) * 100 : null;
+      return `<div class="ag-sum"><span class="ag-si">👤</span><div><b>${esc(d.employee_no)} · ${esc(d.name)}</b><small>Hired ${esc(String(d.hired || '').slice(0, 10))} · last ${d.history.length} pay records</small></div>
+          ${ch != null ? `<span class="ag-delta ${ch >= 0 ? 'up' : 'down'}" style="margin-left:auto">${ch >= 0 ? '▲' : '▼'} ${Math.abs(ch).toFixed(1)}% vs last month</span>` : ''}</div>
+        <div class="ag-spark">${h.map((x) => `<div title="${esc(x.period)}: net ${money(x.net)}"><span style="height:${((+x.gross || +x.net) / max) * 100}%"><i style="height:${(+x.net / (+x.gross || +x.net || 1)) * 100}%"></i></span><small>${esc(x.period.slice(0, 2))}/${esc(x.period.slice(5))}</small></div>`).join('')}</div>
+        <small class="muted"><span class="db-dot b"></span>net pay &nbsp; <span class="db-dot l"></span>gross pay</small>
+        <div class="tblwrap" style="margin-top:10px"><table class="ag-t"><tr><th>Period</th><th>Basic</th><th>Allowances</th><th>Deductions</th><th>CPF</th><th>Gross</th><th>Net</th></tr>
+        ${d.history.map((x) => `<tr><td><b>${esc(x.period)}</b><div><small class="muted">${esc(x.pay_run)}</small></div></td><td>${money(x.basic)}</td><td>${money(x.allowances)}</td><td>${money(x.deductions)}</td><td>${money(x.cpf)}</td><td>${money(x.gross)}</td><td><b>${money(x.net)}</b></td></tr>`).join('')}</table></div>`;
+    }
+    if (m.kind === 'totals') {
+      const r = d[0], p = d[1], max = Math.max(1, ...d.map((x) => +x.gross));
+      const dl = (a, b) => (b && +b ? `<span class="ag-delta ${a >= b ? 'up' : 'down'}" style="font-size:11px;padding:1px 7px">${a >= b ? '▲' : '▼'} ${Math.abs(((a - b) / b) * 100).toFixed(1)}%</span>` : '');
+      return `<div class="ag-sum"><span class="ag-si">💰</span><div><b>${esc(r.name)}: ${money(r.gross)} gross, ${money(r.net)} net</b><small>${r.headcount.toLocaleString()} employees${p ? ` · compared with ${esc(p.name)}` : ''}</small></div></div>
+        <div class="ag-kp">${[['Headcount', r.headcount.toLocaleString(), p && dl(r.headcount, p.headcount)], ['Gross pay', money(r.gross), p && dl(r.gross, p.gross)], ['Net pay', money(r.net), p && dl(r.net, p.net)],
+          ['CPF (total)', money(r.cpf), p && dl(r.cpf, p.cpf)], ['Allowances', money(r.allowances), p && dl(r.allowances, p.allowances)], ['Joiners / leavers', `${r.new_hires} / ${r.leavers}`, '']].map(([l, v, x]) => `<div><small>${l}</small><b>${v}</b>${x || ''}</div>`).join('')}</div>
+        <div class="ag-bars" style="margin-top:12px">${[...d].reverse().map((x) => `<div><span>${esc(x.name)}</span><span class="ag-cb"><i class="e2" style="width:${(+x.gross / max) * 100}%"></i></span><b style="width:auto">${money(x.gross)}</b></div>`).join('')}</div>`;
+    }
+    if (m.kind === 'compare') {
+      const a = d.current, b = d.previous;
+      const row = (l, k) => { const x = +a[k], y = +b[k], c = y ? ((x - y) / y) * 100 : 0; return `<tr><td>${l}</td><td>${k === 'headcount' ? y.toLocaleString() : money(y)}</td><td><b>${k === 'headcount' ? x.toLocaleString() : money(x)}</b></td><td><span class="ag-delta ${c >= 0 ? 'up' : 'down'}" style="font-size:11px;padding:1px 8px">${c >= 0 ? '▲' : '▼'} ${Math.abs(c).toFixed(2)}%</span></td></tr>`; };
+      return `<div class="ag-sum"><span class="ag-si">⇄</span><div><b>${esc(a.name)} vs ${esc(b.name)}</b><small>${d.only_in_current} joined · ${d.only_in_previous} left · ${d.top_changes.length} biggest net-pay changes below</small></div></div>
+        <div class="tblwrap"><table class="ag-t"><tr><th></th><th>${esc(b.name)}</th><th>${esc(a.name)}</th><th>Change</th></tr>${row('Headcount', 'headcount')}${row('Gross pay', 'gross')}${row('Net pay', 'net')}${row('CPF', 'cpf')}${row('Allowances', 'allowances')}${row('Deductions', 'deductions')}</table></div>
+        ${d.top_changes.length ? `<h4 style="margin:14px 0 8px">Biggest net-pay changes</h4><div class="ag-fl">${d.top_changes.map((x) => `<div class="ag-mv"><div><b>${esc(x.employee_no)}</b><small class="muted">${esc(x.name)}</small></div><span>${money(x.previous)} → <b>${money(x.current)}</b></span><span class="ag-delta ${x.change >= 0 ? 'up' : 'down'}">${x.change >= 0 ? '▲' : '▼'} ${money(Math.abs(x.change))}${x.change_pct != null ? ` (${Math.abs(x.change_pct)}%)` : ''}</span></div>`).join('')}</div>` : ''}`;
+    }
+    if (m.kind === 'rule') {
+      return `<div class="ag-sum"><span class="ag-si">📘</span><div><b>${esc(d.q)}</b><small>${esc(d.cat)} · from the PayShield rule knowledge base</small></div></div>
+        <div class="ag-txt" style="padding:4px 2px">${esc(d.a)}</div>${d.src ? `<small class="muted">Source: <a href="${esc(d.src)}" target="_blank" rel="noopener">${esc(d.src)}</a> · check the official page for changes after the knowledge base date.</small>` : ''}`;
+    }
+    return '';
+  }
+
+  async function answer(q) {
+    const steps = [];
+    if (!A.analysis) {
+      if (!T.runs.length) await tool(steps, 'payrun.list', 'List pay runs', loadRuns);
+      const run = pickRun(q);
+      A.analysis = T.analysis = await tool(steps, 'payroll.analyze', `Analyse ${run.name} first`, () => api('/api/v1/payroll/analyze', { method: 'POST', body: JSON.stringify({ payRunId: run.uid }) }));
+    }
+    const a = A.analysis;
+    const emp = (q.match(/\b[A-Z]{1,3}\d{3,}\b/i) || [])[0];
+    if (/pay ?score/i.test(q)) { const p = payScore(a); return say({ who: 'agent', kind: 'text', steps, text: `Pay Score for ${a.payrollPeriod}: ${p.score}/100 (${p.verdict}). ${p.open} open finding(s) on ${p.flagged} employee(s)${p.blocking ? '; high-severity findings cap the score at 79' : ''}.`, src: 'computed' }); }
+    if (emp) {
+      const f = a.anomalies.filter((x) => (x.employeeNo || '').toLowerCase() === emp.toLowerCase());
+      steps.push({ name: 'findings.employee', label: `Findings for ${emp}`, ms: 0, out: `${f.length} finding(s)` });
+      return say({ who: 'agent', kind: 'findings', steps, src: 'analysis', emp: emp.toUpperCase(), items: f,
+        title: f.length ? `${emp.toUpperCase()} has ${f.length} finding${f.length > 1 ? 's' : ''} in ${a.payrollPeriod}` : `${emp.toUpperCase()} looks fine in ${a.payrollPeriod}`,
+        empty: 'Their pay is consistent with their own history and all payroll rules.' });
+    }
+    if (/(highest|top|riskiest|worst|most risk|critical|biggest)/i.test(q)) {
+      const top = [...a.anomalies].sort((x, y) => y.riskScore - x.riskScore).slice(0, 5);
+      steps.push({ name: 'findings.top', label: 'Highest-risk findings', ms: 0, out: `${top.length} of ${a.anomalyCount}` });
+      return say({ who: 'agent', kind: 'findings', steps, src: 'analysis', items: top, title: `Top ${top.length} highest-risk findings in ${a.payrollPeriod}`, empty: 'No findings in this run.' });
+    }
+    if (/(how many|count|number of|breakdown)/i.test(q)) {
+      const key = /severity/i.test(q) ? 'severity' : 'anomalyType';
+      let rows = Object.entries(a.anomalies.reduce((m, x) => ((m[x[key]] = (m[x[key]] || 0) + 1), m), {})).sort((x, y) => y[1] - x[1]);
+      const topic = (q.toLowerCase().match(/overtime|salary|allowance|deduction|net pay|cpf|bonus/) || [])[0];
+      if (topic) rows = rows.filter(([k]) => k.toLowerCase().replaceAll('_', ' ').includes(topic.replace('cpf', 'statutory'))).concat([]);
+      const n = rows.reduce((s, r) => s + r[1], 0);
+      steps.push({ name: 'findings.count', label: `Count findings by ${key === 'severity' ? 'severity' : 'type'}`, ms: 0, out: `${n} finding(s)` });
+      return say({ who: 'agent', kind: 'counts', steps, src: 'analysis', rows: rows.length ? rows : [[topic ? 'unusual ' + topic : 'findings', 0]],
+        title: topic ? `${n} employee finding${n === 1 ? '' : 's'} on ${topic} in ${a.payrollPeriod}` : `${n} findings in ${a.payrollPeriod} by ${key === 'severity' ? 'severity' : 'type'}`,
+        items: topic ? a.anomalies.filter((x) => x.anomalyType.toLowerCase().replaceAll('_', ' ').includes(topic)) : [] });
+    }
+    const r = await tool(steps, 'assistant.ask', 'Read-only assistant over this analysis', () => api('/api/v1/assistant/ask', { method: 'POST', body: JSON.stringify({ question: q, analysisId: a.analysisId }) }));
+    say({ who: 'agent', kind: 'text', steps, text: r.answer, src: r.status });
+  }
+
+  /* rich answer cards */
+  const SEV_ICON = { CRITICAL: '⛔', HIGH: '⚠', MEDIUM: '◆', LOW: 'ℹ' };
+  function findingCard(x) {
+    const cur = Number(x.currentValue), exp = Number(x.expectedValue), has = x.currentValue != null && x.expectedValue != null;
+    const max = has ? Math.max(cur, exp, Number(x.expectedHigh) || 0) || 1 : 1;
+    const ch = x.changePct != null ? Number(x.changePct) : has && exp ? ((cur - exp) / exp) * 100 : null;
+    return `<div class="ag-f s-${x.severity}">
+      <div class="ag-fh"><span class="ag-fi">${SEV_ICON[x.severity] || '•'}</span><div><b>${esc(x.anomalyType.replaceAll('_', ' ').toLowerCase())}</b>
+        <div class="ag-fm"><span class="ti-sev s-${x.severity}">${x.severity}</span><span class="ag-chip">👤 ${esc(x.employeeNo)}</span><span class="ag-chip">${x.ruleId ? 'Rule ' + esc(x.ruleId) : 'AI model'}</span><span class="ag-chip">Risk ${x.riskScore}</span></div></div>
+        ${atRisk(x) ? `<div class="ag-amt"><small>At risk</small><b>S$${Math.round(atRisk(x)).toLocaleString()}</b></div>` : ''}</div>
+      <p class="ag-fd">${esc(x.description)}</p>
+      ${has ? `<div class="ag-cmp"><div><small>Expected</small><span class="ag-cb"><i class="e" style="width:${(exp / max) * 100}%"></i></span><b>${num(exp)}</b></div>
+        <div><small>This run</small><span class="ag-cb"><i class="c s-${x.severity}" style="width:${(cur / max) * 100}%"></i></span><b>${num(cur)}</b></div>
+        ${ch != null && isFinite(ch) ? `<span class="ag-delta ${ch >= 0 ? 'up' : 'down'}">${ch >= 0 ? '▲' : '▼'} ${Math.abs(ch).toFixed(1)}%</span>` : ''}</div>` : ''}
+      <div class="ag-fix"><span>💡</span><div><small>Suggested fix</small>${esc(x.recommendedAction)}</div></div></div>`;
+  }
+  function answerHtml(m) {
+    if (['directory', 'history', 'totals', 'compare', 'rule'].includes(m.kind)) return lookupHtml(m);
+    if (m.kind === 'findings') {
+      const risk = m.items.reduce((s, x) => s + atRisk(x), 0);
+      return `<div class="ag-sum ${m.items.length ? '' : 'ok'}"><span class="ag-si">${m.items.length ? (m.emp ? '👤' : '🔎') : '✓'}</span><div><b>${esc(m.title)}</b><small>${m.items.length ? `${m.items.length} finding${m.items.length > 1 ? 's' : ''}${risk ? ` · about S$${Math.round(risk).toLocaleString()} at risk` : ''}` : esc(m.empty)}</small></div></div>
+        <div class="ag-fl">${m.items.map(findingCard).join('')}</div>`;
+    }
+    if (m.kind === 'counts') {
+      const max = Math.max(1, ...m.rows.map((r) => r[1]));
+      return `<div class="ag-sum"><span class="ag-si">📊</span><div><b>${esc(m.title)}</b><small>From the latest analysis of this pay run</small></div></div>
+        <div class="ag-bars">${m.rows.map(([k, n]) => `<div><span>${esc(String(k).replaceAll('_', ' ').toLowerCase())}</span><span class="ag-cb"><i class="${SEV_W[k] ? 's-' + k : 'e2'}" style="width:${(n / max) * 100}%"></i></span><b>${n}</b></div>`).join('')}</div>
+        ${m.items?.length ? `<div class="ag-fl">${m.items.map(findingCard).join('')}</div>` : ''}`;
+    }
+    const lines = String(m.text || '').split('\n').filter((l) => l.trim());
+    const bullets = lines.filter((l) => /^\s*[-•]/.test(l)), head = lines.filter((l) => !/^\s*[-•]/.test(l));
+    return `${head.length ? `<div class="ag-sum ${m.src === 'REFUSED' ? 'no' : ''}"><span class="ag-si">${m.src === 'REFUSED' ? '🔒' : m.src === 'error' ? '⚠' : '💬'}</span><div><b>${esc(head[0])}</b>${head.slice(1).map((h) => `<small>${esc(h)}</small>`).join('')}</div></div>` : ''}
+      ${bullets.length ? `<ul class="ag-li">${bullets.map((b) => `<li>${esc(b.replace(/^\s*[-•]\s*/, '').replaceAll('_', ' '))}</li>`).join('')}</ul>` : ''}`;
+  }
+
+  async function send(q) {
+    q = String(q || '').trim(); if (!q || T.busy) return;
+    say({ who: 'me', text: q });
+    await act('tiAgent', async () => {
+      try { if (isRunAsk(q)) await runCheck(q); else { const steps = []; const m = await lookupIntent(q, steps); if (m) { if (!m.skip) say(m); } else if (isTrained('PAYROLL')) await answer(q); else say({ who: 'agent', kind: 'text', steps, src: 'error', text: 'I can answer that once the Payroll area is trained. Try “identity issues”, “list all employees” or “total payroll”.' });  } } catch (e) { say({ who: 'agent', kind: 'text', text: 'Sorry, that failed: ' + e.message, src: 'error' }); }
+    });
+  }
+
+  const ago = (d) => d.toLocaleTimeString('en-SG', { hour: '2-digit', minute: '2-digit' });
+  const traceBox = (steps) => (steps && steps.length ? `<details class="ag-trace"><summary>✓ Ran ${steps.length} read-only tool${steps.length > 1 ? 's' : ''} · names stay in your database</summary>
+    ${steps.map((s) => `<div><code>${s.name}</code><span>${esc(s.label)}</span><em>${esc(s.out)}${s.ms ? ` · ${s.ms} ms` : ''}</em></div>`).join('')}</details>` : '');
+
+  function reportHtml(m) {
+    const a = A.analysis, p = payScore(a), C = 2 * Math.PI * 30, col = p.verdict === 'Ready' ? '#16a34a' : p.verdict === 'Review' ? '#d97706' : '#dc2626';
+    const groups = {};
+    a.anomalies.forEach((x) => { (groups[x.anomalyType] = groups[x.anomalyType] || []).push(x); });
+    const row = (x) => `<tr class="${RESOLVED.includes(x.latestFeedback) ? 'done' : ''}"><td><b>${esc(x.employeeNo)}</b><div><span class="ti-sev s-${x.severity}">${x.severity}</span> <small class="muted">risk ${x.riskScore}</small></div></td>
+      <td>${esc(x.description)}</td>
+      <td><div><span class="ag-k">${x.ruleId ? 'RULE' : 'MODEL'}</span> ${x.ruleId ? esc(x.ruleId) : 'Unusual vs own history' + (x.mlPercentile != null ? ` (top ${Math.max(1, Math.round(100 - x.mlPercentile))}%)` : '')}</div>
+        <div><span class="ag-k">HISTORY</span> expected ${num(x.expectedValue)}${x.expectedLow != null ? ` (${num(x.expectedLow)}–${num(x.expectedHigh)})` : ''}, now ${num(x.currentValue)}${x.changePct != null ? ` (${x.changePct > 0 ? '+' : ''}${Number(x.changePct).toFixed(1)}%)` : ''}</div></td>
+      <td>${esc(x.recommendedAction)}${x.latestFeedback ? `<div><span class="ti-pill ${RESOLVED.includes(x.latestFeedback) ? 'ok' : ''}">${esc(x.latestFeedback.replaceAll('_', ' ').toLowerCase())}</span></div>` : ''}</td>
+      <td class="ag-risk">${atRisk(x) ? 'S$' + Math.round(atRisk(x)).toLocaleString() : '—'}</td></tr>`;
+    return `<div class="ag-card"><div class="ag-h">${ICON.bot}<b>PayShield Agent</b><span class="muted">Checked at ${ago(m.at)}</span></div>${traceBox(m.steps)}
+      <div class="ag-score"><div class="ag-ring"><svg viewBox="0 0 72 72"><circle cx="36" cy="36" r="30" stroke="#e5e7eb" stroke-width="7" fill="none"/><circle cx="36" cy="36" r="30" stroke="${col}" stroke-width="7" fill="none" stroke-linecap="round" stroke-dasharray="${C}" stroke-dashoffset="${C * (1 - p.score / 100)}" transform="rotate(-90 36 36)"/></svg><b>${p.score}</b></div>
+        <div><small style="color:${col};font-weight:700;letter-spacing:.5px">PAY SCORE</small><h3>${p.score}/100 · ${p.verdict}</h3><small class="muted">${a.totalEmployees - p.flagged}/${a.totalEmployees} employees clear · ${p.open} open finding(s)${p.blocking ? ' · high-severity findings cap it at 79' : ''}</small></div></div>
+      <p>The ${esc(a.payrollPeriod)} run is <b>${p.verdict.toLowerCase()}</b>. ${a.anomalyCount ? `${p.open} open finding(s) on ${p.flagged} employee(s), about <b>S$${Math.round(p.risk).toLocaleString()}</b> away from each employee's expected pay. Each finding below has its rule, the employee's own history and a suggested fix.` : 'No findings: every employee is consistent with their own history and the payroll rules.'}</p>
+      ${a.warnings.length ? `<div class="ti-warn">${a.warnings.map(esc).join('<br>')}</div>` : ''}
+      ${a.anomalyCount ? `<div class="tblwrap"><table class="ag-t"><tr><th>Employee</th><th>What was found</th><th>Rule and history</th><th>Suggested fix</th><th>At risk</th></tr>
+        ${Object.entries(groups).map(([k, xs]) => `<tr class="ag-g"><td colspan="5"><b>${esc(k.replaceAll('_', ' ').toLowerCase())}</b> · ${xs.length} finding${xs.length > 1 ? 's' : ''}</td></tr>${xs.map(row).join('')}`).join('')}</table></div>
+        <button class="btn p ti-big" data-act="tiAgReview" style="margin-top:12px">Go through the ${a.anomalyCount} findings with me, one by one</button>
+        <div class="ag-note">✓ Each decision you confirm is saved to Times Intelligence as reviewer feedback and used when the model is retrained.</div>` : ''}
+      ${m.identity ? `<h4 class="ar-h" style="margin-top:18px">🪪 Identification · ${m.identity.findingCount} finding${m.identity.findingCount === 1 ? '' : 's'}</h4>${m.identity.findingCount ? `<div class="ag-fl">${m.identity.findings.slice(0, 6).map(findingCard).join('')}</div>${m.identity.findingCount > 6 ? `<button class="linkbtn" data-act="page:tiIdentity">See all ${m.identity.findingCount} identity findings →</button>` : ''}` : '<div class="ag-sum ok"><span class="ag-si">✓</span><div><b>No identity issues</b></div></div>'}` : ''}</div>`;
+  }
+
+  function reviewHtml() {
+    const a = A.analysis, x = a && a.anomalies[A.review];
+    if (!x) return '';
+    return `<div class="ag-card ag-rev"><div class="ag-h">${ICON.bot}<b>Finding ${A.review + 1} of ${a.anomalies.length}</b><span class="muted">${esc(x.employeeNo)}</span></div>
+      <div class="ti-find s-${x.severity}" style="margin:8px 0"><div class="ti-risk"><b>${x.riskScore}</b><small>risk</small></div><div class="ti-fb"><div class="ti-fh"><span class="ti-sev s-${x.severity}">${x.severity}</span><b>${esc(x.anomalyType.replaceAll('_', ' ').toLowerCase())}</b></div><p>${esc(x.description)}</p><p class="ti-act">→ ${esc(x.recommendedAction)}</p></div></div>
+      <div class="ag-opts">${OUTCOMES.map(([k, l, c]) => `<button class="btn sm ${c} ${x.latestFeedback === k ? 'on' : ''}" data-act="tiAgDecide:${k}" ${T.busy ? 'disabled' : ''}>${l}</button>`).join('')}
+        <button class="linkbtn" data-act="tiAgSkip">Skip</button><button class="linkbtn" data-act="tiAgStop">Stop review</button></div>
+      <small class="muted">The agent never changes pay. Fixes are made in Pay by an authorised user; this only records your decision.</small></div>`;
+  }
+
+  function agentBody(fallback) {
+    if (A.demo || !T.sub?.subscribed || !anyTrained()) return fallback() + (anyTrained() ? `<div style="margin-top:12px"><button class="linkbtn" data-act="tiAgDemo">← Back to the live agent</button></div>` : '');
+    lazy('runs', () => loadRuns());
+    const sugg = ['Check the latest pay run and give the pay score', 'What are the highest-risk anomalies?', 'How many employees have unusual overtime?',
+      ...(A.analysis?.anomalies[0] ? [`Show findings for ${A.analysis.anomalies[0].employeeNo}`] : []), 'What is the pay score?'];
+    const msgs = A.msgs.map((m) => (m.who === 'me' ? `<div class="ag-me">${esc(m.text)}</div>`
+      : m.kind === 'report' ? reportHtml(m)
+        : `<div class="ag-card"><div class="ag-h">${ICON.bot}<b>PayShield Agent</b><span class="ti-pill">${esc(({ FALLBACK: 'built-in answer', OK: 'AI answer', REFUSED: 'refused: read-only', computed: 'computed', analysis: 'from the analysis', lookup: 'payroll lookup', identity: 'identification checks', knowledge: 'rule knowledge base', error: 'error' })[m.src] || String(m.src || '').toLowerCase())}</span></div>${traceBox(m.steps)}${answerHtml(m)}</div>`)).join('');
+    return `${errBox()}${hero(ICON.bot, 'PayShield Agent', `Live on your data: ${AREA_LIST.filter(([k]) => isTrained(k)).map(([k, l]) => (k === 'PAYROLL' ? `Payroll v${esc(T.status.activeModel.modelVersion)}` : `${l}${areaOf(k).isMock ? ' (demo)' : ''}`)).join(', ')}. Ask about any pay run, or let the agent check the whole run and give a Pay Score.`,
+      `<button class="linkbtn" data-act="tiAgDemo" style="color:#fff">Sample demo →</button>`)}
+      <section class="ti-panel ag-chat">${msgs || `<div class="ti-empty" style="margin:0"><span class="ti-kic">${ICON.bot}</span><b>Ask PayShield Agent anything about your pay runs</b><p>e.g. “Check the ${T.runs[0] ? esc(T.runs[0].name) : 'latest'} pay run”, “Why is E00002 flagged?”, “How many employees have unusual overtime?”</p></div>`}
+        ${reviewHtml()}${T.busy === 'tiAgent' ? '<div class="ag-card muted"><span class="tr-spin" style="width:16px;height:16px;margin:0 8px -3px 0"></span>Working…</div>' : ''}<div class="ag-end"></div>
+        <div class="ag-sugg">${sugg.map((s, i) => `<button class="ti-q" data-act="tiAgSugg:${i}" ${T.busy ? 'disabled' : ''}>${i === 0 ? '▶ ' : ''}${esc(s)}</button>`).join('')}</div>
+        <div class="ag-in"><input id="tiAgQ" placeholder="Ask PayShield Agent, e.g. “check the October pay run”" ${T.busy ? 'disabled' : ''}><button class="btn p ti-big" data-act="tiAgSend" ${T.busy ? 'disabled' : ''}>Send</button></div></section>
+      ${panel('What the agent runs', 'All read-only. None can change pay.', `<div class="ag-tools">${[['payrun.list', 'Pay runs for this company only'], ['payroll.analyze', '17 payroll rules + your trained model, each employee vs their own history'], ['payscore.compute', 'Share of clean employees minus severity penalty; high severity caps at 79'], ['findings.employee', 'One employee’s findings from the analysis'], ['assistant.ask', 'Read-only assistant: summary, counts, top risks (no SQL is generated)'], ['employee.directory', 'List or search employees with their latest pay'], ['employee.payHistory', 'One employee’s last N months: basic, allowances, CPF, gross, net'], ['payrun.totals', 'Headcount, gross, net, CPF per pay run, with trend'], ['payrun.compare', 'This run vs the previous one, joiners/leavers and biggest changes'], ['rules.knowledge', 'CPF / IRAS / MOM answers from the checked rule knowledge base, with source'], ['feedback.save', 'Your confirmed decision, saved for retraining']].map(([n, d]) => `<div><code>${n}</code><span>${d}</span></div>`).join('')}</div>`)}
+      ${panel('Guardrails', '', `<ul class="ag-ul"><li>No SQL is written by a language model; every tool is a fixed, tested query scoped to this company.</li><li>Requests to approve, change or pay are refused; the agent only reads and records decisions.</li><li>Answers come from the analysis; if a language model is configured it sees pseudonymous references, never names.</li><li>Every analysis, question (hashed) and decision is recorded in the times_intelligence schema.</li></ul>`)}`;
+  }
+
+  const agentActions = {
+    tiAgSend: () => { const el = document.getElementById('tiAgQ'); const q = el?.value; if (el) el.value = ''; send(q); },
+    tiAgSugg: (i) => { const s = [...document.querySelectorAll('[data-act^="tiAgSugg:"]')][+i]; send(s?.textContent.replace(/^▶\s*/, '')); },
+    tiAgReview: () => { A.review = 0; render(); setTimeout(() => document.querySelector('.ag-rev')?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 30); },
+    tiAgSkip: () => { A.review = A.review + 1 < A.analysis.anomalies.length ? A.review + 1 : -1; render(); },
+    tiAgStop: () => { A.review = -1; render(); },
+    tiAgDemo: () => { A.demo = !A.demo; render(); },
+    tiAgDecide: (k) => act('tiAgDecide', async () => {
+      const x = A.analysis.anomalies[A.review];
+      await api('/api/v1/payroll/feedback', { method: 'POST', body: JSON.stringify({ anomalyId: x.anomalyId, outcome: k }) });
+      x.latestFeedback = k;
+      const p = payScore(A.analysis);
+      toast(`<b>Saved:</b> ${esc(x.employeeNo)} · ${k.replaceAll('_', ' ').toLowerCase()}. Pay Score now <b>${p.score}/100 · ${p.verdict}</b>`);
+      A.review = A.review + 1 < A.analysis.anomalies.length ? A.review + 1 : -1;
+    }),
+  };
+  document.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target?.id === 'tiAgQ') agentActions.tiAgSend(); });
+
+  function identityBody() {
+    if (!T.ident && !T.loaded.ident) { T.loaded.ident = true; api('/api/v1/identity/check').then((r) => { T.ident = r; }).catch((e) => { T.err = e.message; }).finally(render); }
+    const r = T.ident;
+    const head = hero('🪪', 'Identity checks', 'Duplicate NRIC/FIN, shared bank accounts and phones, work pass expiry, missing IDs, and identity details changed since Identification was trained.',
+      `<button class="btn p ti-big" data-act="tiIdentRun" ${T.busy ? 'disabled' : ''}>${T.busy === 'tiIdentRun' ? 'Checking…' : '↻ Run checks'}</button>`, 'blue');
+    if (!r) return `${errBox()}${head}<div class="ti-empty"><span class="tr-spin"></span><br><b>Checking every employee…</b></div>`;
+    const max = Math.max(1, ...Object.values(r.byType));
+    return `${errBox()}${head}${kpis([[ICON.users, 'Employees checked', r.employees.toLocaleString(), esc(r.payRun || '')], [ICON.alert, 'Flagged', r.flaggedEmployees, `${r.findingCount} findings`, r.findingCount ? 'red' : 'green'],
+      [ICON.shield, 'Identification model', 'v' + r.modelVersion, 'trained ' + esc(r.trainedOn.slice(0, 10)), 'violet'], [ICON.clock, 'Check time', (r.durationMs / 1000).toFixed(1) + 's', 'live on your database', 'green']])}
+      ${r.findingCount ? panel('By type', '', `<div class="ag-bars">${Object.entries(r.byType).sort((a, b) => b[1] - a[1]).map(([k, n]) => `<div><span>${esc(k.replaceAll('_', ' ').toLowerCase())}</span><span class="ag-cb"><i class="e2" style="width:${(n / max) * 100}%"></i></span><b>${n}</b></div>`).join('')}</div>`) : ''}
+      ${panel('Findings', 'Highest risk first', r.findingCount ? `<div class="ag-fl">${r.findings.map(findingCard).join('')}</div>` : '<div class="ti-empty ok"><span class="ti-kic">✓</span><b>No identity issues</b></div>')}`;
   }
 
   const pages = {
+    tiDash: { crumb: 'Home › <b>Dashboard</b>', body: dashBody },
     tiSubscribe: { crumb: 'Times Intelligence › <b>Subscription</b>', body: subscribeBody },
     tiAnomaly: { crumb: 'Times Intelligence › <b>AI anomaly detection</b>', body: anomalyBody },
     tiTrain: { crumb: 'Times Intelligence › <b>Train model</b>', body: trainBody },
+    tiIdentity: { crumb: 'Times Intelligence › <b>Identity checks</b>', body: identityBody },
   };
-  const labels = { tiSubscribe: 'Times Intelligence', tiAnomaly: 'AI anomaly detection', tiTrain: 'Train model' };
+  const labels = { tiDash: 'Dashboard', tiSubscribe: 'Times Intelligence', tiAnomaly: 'AI anomaly detection', tiTrain: 'Train model', tiIdentity: 'Identity checks' };
 
   const menu = () => [{ label: 'AI model', items: T.sub?.subscribed ? [
-    { k: 'tiAnomaly', label: 'AI anomaly detection', icon: 'spark', act: 'page:tiAnomaly', tag: '<span class="new">AI</span>' },
+    ...(isTrained('PAYROLL') ? [{ k: 'tiAnomaly', label: 'AI anomaly detection', icon: 'spark', act: 'page:tiAnomaly', tag: '<span class="new">AI</span>' }] : []),
+    ...(isTrained('IDENTIFICATION') ? [{ k: 'tiIdentity', label: 'Identity checks', icon: 'shield', act: 'page:tiIdentity' }] : []),
     { k: 'tiTrain', label: 'Train model', icon: 'flask', act: 'page:tiTrain' },
   ] : [] }];
 
   const actions = {
-    tiSubscribe: () => act('tiSubscribe', async () => { T.sub = await api('/api/v1/intelligence/subscribe', { method: 'POST' }); await loadModel(); toast(T.status.activeModel ? '<b>✓ Successfully subscribed to Times Intelligence.</b>' : '<b>✓ Successfully subscribed.</b> Train your company model to unlock PayShield'); }),
+    tiSubscribe: () => act('tiSubscribe', async () => { T.sub = await api('/api/v1/intelligence/subscribe', { method: 'POST' }); await loadModel(); toast(anyTrained() ? '<b>✓ Successfully subscribed to Times Intelligence.</b>' : '<b>✓ Successfully subscribed.</b> Choose the areas to train to unlock Times Intelligence'); }),
     tiUnsubscribe: () => {
-      if (!confirm('Unsubscribe from Times Intelligence? Trained models and past analyses are kept.')) return;
-      act('tiUnsubscribe', async () => { T.sub = await api('/api/v1/intelligence/unsubscribe', { method: 'POST' }); T.analysis = T.answer = null; toast('Unsubscribed from Times Intelligence'); });
+      if (!confirm('Unsubscribe from Times Intelligence?\n\nThis permanently deletes all trained models, training history, analyses, findings and feedback for this company. If you subscribe again you will need to train a new model.')) return;
+      act('tiUnsubscribe', async () => {
+        const r = await api('/api/v1/intelligence/unsubscribe', { method: 'POST' });
+        T.sub = r; T.analysis = T.answer = T.injected = null; Object.assign(A, { msgs: [], analysis: null, review: -1 }); T.status = null; T.versions = []; T.step = -1; T.loaded = {}; T.areaRun = []; T.ident = null;
+        const x = r.removed || {};
+        toast(`<b>Unsubscribed.</b> Times Intelligence data reset: ${x.model_registry || 0} model(s), ${x.model_files || 0} model file(s), ${x.training_job || 0} training job(s), ${x.analysis || 0} analysis(es) deleted`);
+      });
     },
+    tiArea: (k) => { if (T.busy) return; T.sel.has(k) ? T.sel.delete(k) : T.sel.add(k); render(); },
+    tiAreaAll: (v) => { if (T.busy) return; T.sel = new Set(+v ? AREA_LIST.map((a) => a[0]) : []); render(); },
     tiTrain: () => act('tiTrain', async () => {
-      T.step = 0; T.pct = 0; T.t0 = Date.now(); T.failed = false; render();
-      const job = await api('/api/v1/models/train', { method: 'POST', body: '{}' });
+      const areas = AREA_LIST.map((a) => a[0]).filter((k) => T.sel.has(k));
+      if (!areas.length) return;
+      const wasLocked = !anyTrained();
+      T.areaRun = areas.map((k) => ({ k, state: 'run' }));
+      T.step = areas.includes('PAYROLL') ? 0 : -1; T.pct = 0; T.t0 = Date.now(); T.failed = false; render();
+      const job = await api('/api/v1/models/train', { method: 'POST', body: JSON.stringify({ areas }) });
+      (job.areas || []).forEach((res) => { const x = T.areaRun.find((y) => y.k === res.area); if (x) Object.assign(x, { state: 'ok', res }); });
+      render();
+      const names = areas.map((k) => AREA_LIST.find((a) => a[0] === k)[1]).join(', ');
+      if (!job.jobId) { await loadModel(); toast(`<b>✓ Trained: ${esc(names)}.</b>${wasLocked ? ' Times Intelligence is unlocked.' : ''}`); return; }
       for (let tick = 0; ; tick++) {
         const j = await api(`/api/v1/models/training-jobs/${job.jobId}`);
-        if (!['QUEUED', 'RUNNING'].includes(j.status)) { T.failed = j.status !== 'SUCCEEDED'; T.step = T.failed ? T.step : 99; T.pct = T.failed ? T.pct : 100; T.secs = j.durationMs / 1000; toast(j.status === 'SUCCEEDED' && !T.status?.activeModel ? `<b>✓ Model trained in ${(j.durationMs / 1000).toFixed(1)}s.</b> Times Intelligence is unlocked — all PayShield menus are now available` : `Model training ${j.status.toLowerCase()} in ${(j.durationMs / 1000).toFixed(1)}s`); break; }
+        if (!['QUEUED', 'RUNNING'].includes(j.status)) { const px = T.areaRun.find((y) => y.k === 'PAYROLL'); if (px) Object.assign(px, { state: j.status === 'SUCCEEDED' ? 'ok' : 'bad', res: { durationMs: j.durationMs || 0 } }); T.failed = j.status !== 'SUCCEEDED'; T.step = T.failed ? T.step : 99; T.pct = T.failed ? T.pct : 100; T.secs = j.durationMs / 1000; toast(j.status === 'SUCCEEDED' ? `<b>✓ Trained: ${esc(names)}</b> (payroll model in ${(j.durationMs / 1000).toFixed(1)}s).${wasLocked ? ' Times Intelligence is unlocked.' : ''}` : `Payroll training ${j.status.toLowerCase()} in ${(j.durationMs / 1000).toFixed(1)}s`); break; }
         T.pct = Math.min(96, Math.round(100 * (1 - Math.exp(-(tick + 1) / 7)))); T.step = Math.min(4, Math.floor(T.pct / 20)); render();
         await new Promise((r) => setTimeout(r, 1200));
       }
       await loadModel();
     }),
+    tiIdentRun: () => act('tiIdentRun', async () => { T.ident = await api('/api/v1/identity/check'); }),
     tiActivate: (id) => act('tiActivate', async () => { await api(`/api/v1/models/${id}/activate`, { method: 'POST' }); toast('Model activated'); await loadModel(); }),
     tiInject: () => act('tiInject', async () => { T.injected = await (await fetch('/dev/inject-run', { method: 'POST' })).json(); await loadRuns(T.injected.payRunId); }),
     tiAnalyze: () => act('tiAnalyze', async () => { T.answer = null; T.analysis = await api('/api/v1/payroll/analyze', { method: 'POST', body: JSON.stringify({ payRunId: T.run }) }); }),
@@ -214,5 +784,5 @@ export function intelligence({ S, render, openPage }) {
     if (ctx) { H['X-Tenant-Uid'] = ctx.tenantUid; H['X-Company-Uid'] = ctx.companyUid; T.ctx = ctx; }
     return api('/api/v1/intelligence/subscription'); }).then(async (s) => { T.sub = s; if (s.subscribed) { await loadModel(); T.loaded.model = true; } }).catch((e) => { T.err = e.message; }).finally(render);
 
-  return { pages, labels, menu, actions, shell };
+  return { pages, labels, menu, actions: { ...actions, ...agentActions }, shell, agentPage: agentBody };
 }

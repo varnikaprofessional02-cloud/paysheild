@@ -13,11 +13,12 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
 from app.core.config import Settings, get_settings
-from app.core.errors import Forbidden, NotFound, PayShieldError, Unauthorized, problem_response
+from app.core.errors import Forbidden, NotFound, PayShieldError, Unauthorized, ValidationFailed, problem_response
 from app.core.logging import configure_logging, new_correlation_id, set_correlation_id
 from app.core.security import Authenticator, JwksCache, VerifiedService
 from app.core.tenant_context import TenantContext, TenantInfo
 from app.db.connection import ConnectionManager
+from app.db.lookup_repository import PostgresLookupRepository
 from app.db.payroll_repository import PostgresPayrollReadRepository
 from app.db.payshield_repository import PostgresPayShieldRepository
 from app.db.tenant_resolver import PostgresTenantResolver
@@ -26,6 +27,7 @@ from app.ml.model_bundle import build_artifact_store
 from app.ml.model_registry import BundleCache, ModelRegistry
 from app.security.permissions import build_service_context, build_user_context, require
 from app.services.analysis_service import PayShieldService
+from app.services.area_service import AREAS, AreaService
 from app.services.assistant_service import AssistantService
 
 log = logging.getLogger(__name__)
@@ -45,6 +47,7 @@ class AnalyzeRequest(Api):
 
 class TrainRequest(Api):
     trigger: Literal["MANUAL", "INITIAL"] = "MANUAL"
+    areas: list[str] = Field(default_factory=lambda: ["PAYROLL"], min_length=1)
 
 
 class FeedbackRequest(Api):
@@ -71,6 +74,12 @@ class Runtime:
     def payroll(self, t: TenantInfo):
         return PostgresPayrollReadRepository(self.conn, t.db_name)
 
+    def areas(self, t: TenantInfo) -> AreaService:
+        return AreaService(self.conn, t.db_name)
+
+    def lookup(self, t: TenantInfo) -> PostgresLookupRepository:
+        return PostgresLookupRepository(self.conn, t.db_name)
+
     def service(self, ctx: TenantContext) -> PayShieldService:
         repo = PostgresPayShieldRepository(self.conn, ctx.tenant.db_name)
         return PayShieldService(self.s, self.payroll(ctx.tenant), repo, ModelRegistry(repo, self.store, self.cache))
@@ -89,6 +98,12 @@ def _anomaly(a, refs) -> dict[str, Any]:
             "expectedLow": a.expected_low, "expectedHigh": a.expected_high, "expectedMethod": a.expected_method,
             "changePct": a.change_pct, "isExplained": a.is_explained, "description": a.description,
             "recommendedAction": a.recommended_action, "evidence": a.evidence, "latestFeedback": a.latest_feedback}
+
+
+def _area(a: dict) -> dict[str, Any]:
+    return {"modelId": a["model_id"], "area": a["area"], "label": AREAS.get(a["area"], {}).get("label", a["area"]),
+            "version": a["version"], "isMock": a["is_mock"], "recordCount": a["record_count"], "durationMs": a["duration_ms"],
+            "summary": a["summary"], "trainedOn": a["trained_on"].isoformat(), "trainedBy": a["trained_by"]}
 
 
 def _analysis(rt: Runtime, ctx: TenantContext, a, anomalies) -> dict[str, Any]:
@@ -157,8 +172,14 @@ def create_app(settings: Settings | None = None, runtime: Runtime | None = None)
     @app.post(p + "/intelligence/unsubscribe")
     def unsubscribe(ctx: TenantContext = Depends(context)):
         require(ctx, settings.manage_permission)
-        rt.service(ctx).repo.unsubscribe(ctx.company_id, ctx.actor)
-        return {"subscribed": False, "modules": [], "subscribedOn": None}
+        repo = rt.service(ctx).repo
+        repo.unsubscribe(ctx.company_id, ctx.actor)
+        # unsubscribing resets Times Intelligence for the company: analyses, feedback, training jobs and models are deleted
+        removed = repo.purge_company_data(ctx.company_id)
+        removed["model_files"] = rt.store.delete_company(ctx.tenant_uid, ctx.company_uid)
+        rt.cache.evict_company(ctx.tenant_uid, ctx.company_uid)
+        log.info("unsubscribed and purged company %s: %s", ctx.company_id, removed)
+        return {"subscribed": False, "modules": [], "subscribedOn": None, "removed": removed}
 
     @app.post(p + "/intelligence/subscribe")
     def subscribe(ctx: TenantContext = Depends(context)):
@@ -179,8 +200,26 @@ def create_app(settings: Settings | None = None, runtime: Runtime | None = None)
     @app.post(p + "/models/train", status_code=202)
     def train(body: TrainRequest, ctx: TenantContext = Depends(subscribed)):
         require(ctx, settings.manage_permission)
-        job = rt.service(ctx).request_training(ctx, body.trigger, run_inline=settings.messaging.execution_mode == "inline")
-        return {"jobId": job.uid, "status": job.status}
+        areas = list(dict.fromkeys(a.upper() for a in body.areas))
+        unknown = [a for a in areas if a not in AREAS]
+        if unknown:
+            raise ValidationFailed("UNKNOWN_AREA", f"Unknown training area(s): {', '.join(unknown)}")
+        # quick areas train inline; Payroll is the heavy ML job and runs in the background
+        trained = [_area(rt.areas(ctx.tenant).train(ctx.company_id, a, ctx.actor)) for a in areas if a != "PAYROLL"]
+        job = rt.service(ctx).request_training(ctx, body.trigger, run_inline=settings.messaging.execution_mode == "inline")             if "PAYROLL" in areas else None
+        return {"jobId": job.uid if job else None, "status": job.status if job else "SUCCEEDED", "areas": trained}
+
+    @app.get(p + "/models/areas")
+    def areas_catalog(ctx: TenantContext = Depends(subscribed)):
+        return {"areas": [{"area": k, **v} for k, v in AREAS.items()]}
+
+    @app.get(p + "/identity/check")
+    def identity_check(ctx: TenantContext = Depends(subscribed)):
+        require(ctx, settings.view_permission)
+        r = rt.areas(ctx.tenant).check_identification(ctx.company_id)
+        if r is None:
+            raise NotFound("AREA_NOT_TRAINED", "Identification has not been trained for this company.")
+        return r
 
     @app.get(p + "/models/training-jobs/{job_id}")
     def job(job_id: str, ctx: TenantContext = Depends(subscribed)):
@@ -194,7 +233,8 @@ def create_app(settings: Settings | None = None, runtime: Runtime | None = None)
         svc = rt.service(ctx)
         active = svc.repo.get_active_model(ctx.company_id)
         jobs = svc.repo.list_training_jobs(ctx.company_id, 1)
-        return {"activeModel": _model(active) if active else None, "latestJob": _job(jobs[0]) if jobs else None}
+        return {"activeModel": _model(active) if active else None, "latestJob": _job(jobs[0]) if jobs else None,
+                "areas": [_area(a) for a in rt.areas(ctx.tenant).list_active(ctx.company_id)]}
 
     @app.get(p + "/models/versions")
     def versions(ctx: TenantContext = Depends(subscribed)):
@@ -230,6 +270,34 @@ def create_app(settings: Settings | None = None, runtime: Runtime | None = None)
         ans = rt.assistant(ctx).ask(ctx, body.question, body.analysis_id)
         return {"answer": ans.answer, "status": ans.status, "citations": ans.citations, "toolCalls": ans.tool_calls,
                 "model": ans.model}
+
+    # read-only lookups for the PayShield Agent (fixed queries, company-scoped, View permission) ----------------
+    def viewer(ctx: TenantContext = Depends(subscribed)) -> TenantContext:
+        require(ctx, settings.view_permission)
+        return ctx
+
+    @app.get(p + "/lookup/employees")
+    def lookup_employees(q: str | None = None, limit: int = 50, offset: int = 0, ctx: TenantContext = Depends(viewer)):
+        return rt.lookup(ctx.tenant).list_employees(ctx.company_id, q, max(1, min(limit, 200)), max(0, offset))
+
+    @app.get(p + "/lookup/employees/{employee_no}/pay-history")
+    def lookup_history(employee_no: str, months: int = 6, ctx: TenantContext = Depends(viewer)):
+        h = rt.lookup(ctx.tenant).employee_pay_history(ctx.company_id, employee_no, max(1, min(months, 36)))
+        if h is None:
+            raise NotFound("EMPLOYEE_NOT_FOUND", f"No employee {employee_no} in this company.")
+        return h
+
+    @app.get(p + "/lookup/pay-runs/totals")
+    def lookup_totals(limit: int = 6, ctx: TenantContext = Depends(viewer)):
+        return {"runs": rt.lookup(ctx.tenant).run_totals(ctx.company_id, max(1, min(limit, 24)))}
+
+    @app.get(p + "/lookup/pay-runs/compare")
+    def lookup_compare(pay_run_id: str | None = None, against_pay_run_id: str | None = None, top: int = 10,
+                       ctx: TenantContext = Depends(viewer)):
+        c = rt.lookup(ctx.tenant).compare_runs(ctx.company_id, pay_run_id, against_pay_run_id, max(1, min(top, 50)))
+        if c is None:
+            raise NotFound("PAY_RUN_NOT_FOUND", "Need two pay runs of this company to compare.")
+        return c
 
     @app.post(p + "/internal/sweep")
     def sweep(_: VerifiedService = Depends(service_only)):

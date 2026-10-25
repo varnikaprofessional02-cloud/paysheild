@@ -350,7 +350,7 @@ const PAGES = buildPages({ S, company: CO });
 const SC_MODULE = { preflight:'home', payrun:'home', compare:'proof', bank:'bank', network:'bank', attend:'time', rules:'compliance', validators:'validators', agent:'agent', ask:'agent', learn:'proof', model:'pay', proof:'proof', csv:'proof' };
 const PAGE_LABEL = { home:'Trust Check', people:GUARDS.people.name, time:GUARDS.time.name, bank:GUARDS.bank.name, pay:GUARDS.pay.name, compliance:GUARDS.compliance.name, proof:'Proof', agent:'PayShield Agent', records:'Pay run records' };
 S.mode = 'page'; S.page = 'home'; S.issues = ISSUES(); S.approved = false; initAgentState(S);
-PAGES.agent = { crumb: 'PayShield › <b>PayShield Agent</b>', body: () => agentBody(S) };
+PAGES.agent = { crumb: 'PayShield › <b>PayShield Agent</b>', body: () => TI.agentPage(() => agentBody(S)) };
 PAGES.records = { crumb: 'PayShield › <b>Pay run records</b>', body: () => recordsBody(S) };
 const TI = intelligence({ S, render: () => render() }); Object.assign(PAGES, TI.pages); Object.assign(PAGE_LABEL, TI.labels); S.policy = Object.fromEntries(POLICIES.map((p) => [p.id, p.on]));
 const gCount = (k) => pendingIn(S.issues, k).length, gHeld = (k) => pendingIn(S.issues, k).some((i) => i.status === 'held');
@@ -552,4 +552,4 @@ document.addEventListener('keydown', e => {
   if (e.key === 'ArrowLeft') go(S.step - 1);
 });
 S.guideHidden = true;
-openPage('home');
+openPage('tiDash');

@@ -28,6 +28,9 @@ def add_months(d: date, n: int) -> date:
     return date(d.year + y, m + 1, 1)
 
 
+LOCAL_DEV_REVIEWER = "00000000-0000-4000-8000-00000000d0e0"  # fixed reviewer id for the local demo UI
+
+
 class PayShieldService:
     def __init__(self, settings: Settings, payroll: PayrollReadRepository, repo: PayShieldRepository, registry: ModelRegistry):
         self.s, self.payroll, self.repo, self.registry = settings, payroll, repo, registry
@@ -175,7 +178,8 @@ class PayShieldService:
 
     # ------------------------------------------------------------------ feedback
     def feedback(self, ctx: TenantContext, anomaly_uid: str, outcome: str, comment: str | None):
-        if ctx.is_service:
+        # local dev uses the shared-secret service login, so allow the demo UI to record decisions there only
+        if ctx.is_service and self.s.environment != "local":
             raise Forbidden("REVIEWER_REQUIRED", "Feedback must be given by a payroll user.")
         try:
             FeedbackOutcome(outcome)
@@ -185,7 +189,8 @@ class PayShieldService:
         if anomaly is None or not ctx.access.allows(anomaly.user_id):
             raise NotFound("ANOMALY_NOT_FOUND", "Anomaly not found.")
         # stored for evaluation and future supervised training; no automatic retraining on feedback
-        return self.repo.add_feedback(ctx.company_id, anomaly.id, outcome, comment, ctx.principal.subject)
+        reviewer = LOCAL_DEV_REVIEWER if ctx.is_service else ctx.principal.subject  # service login only reaches here in local
+        return self.repo.add_feedback(ctx.company_id, anomaly.id, outcome, comment, reviewer)
 
 
 def _r(v):

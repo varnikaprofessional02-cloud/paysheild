@@ -39,6 +39,12 @@ class BundleCache:
                 self._items.popitem(last=False)
 
 
+    def evict_company(self, tenant_uid: str, company_uid: str) -> None:
+        with self._lock:
+            for k in [k for k in self._items if k[:2] == (tenant_uid, company_uid)]:
+                del self._items[k]
+
+
 class ModelRegistry:
     def __init__(self, repo: PayShieldRepository, store: ArtifactStore, cache: BundleCache):
         self.repo, self.store, self.cache = repo, store, cache
