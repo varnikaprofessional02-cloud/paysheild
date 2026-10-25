@@ -1,0 +1,72 @@
+# PayShield AI - mirrors the house pipelines (test -> docker build/push per environment).
+trigger:
+  branches: { include: [ main ] }
+  paths: { include: [ "payshield-ai/*", "dotnet/*" ] }
+
+variables:
+  TARGET_ENV: dev
+  tag: $(Build.BuildNumber)
+
+stages:
+- stage: Test
+  jobs:
+  - job: Python
+    pool: { vmImage: ubuntu-latest }
+    steps:
+    - task: UsePythonVersion@0
+      inputs: { versionSpec: "3.12" }
+    - script: |
+        cd payshield-ai
+        pip install -r requirements-dev.txt
+        pytest -m "not pg" --junitxml=test-results.xml
+      displayName: pytest
+    - task: PublishTestResults@2
+      condition: always()
+      inputs: { testResultsFiles: "payshield-ai/test-results.xml" }
+  - job: DotNet
+    pool: { vmImage: windows-latest }
+    steps:
+    - task: UseDotNet@2
+      inputs: { version: "8.0.x" }
+    - script: dotnet test dotnet/Times.PayShield.slnx --logger trx
+      displayName: dotnet test
+
+- stage: BuildAndPush
+  dependsOn: Test
+  jobs:
+  - job: Docker
+    pool: { vmImage: ubuntu-latest }
+    steps:
+    - task: Docker@2
+      inputs:
+        command: buildAndPush
+        containerRegistry: dockerhub-connection
+        repository: $(DOCKERHUB_REPOPATH)/times-payshield-ai
+        dockerfile: payshield-ai/Dockerfile
+        buildContext: payshield-ai
+        tags: |
+          $(tag)-$(TARGET_ENV)
+          $(TARGET_ENV)-latest
+
+- stage: Deploy
+  dependsOn: BuildAndPush
+  jobs:
+  - deployment: Bicep
+    environment: payshield-$(TARGET_ENV)   # approval gate configured on the Azure DevOps environment
+    pool: { vmImage: ubuntu-latest }
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - checkout: self
+          - task: AzureCLI@2
+            inputs:
+              azureSubscription: $(AZURE_SERVICE_CONNECTION)
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: >
+                az deployment group create -g $(RESOURCE_GROUP) -f deploy/bicep/main.bicep
+                -p env=$(TARGET_ENV) image=$(DOCKERHUB_REPOPATH)/times-payshield-ai:$(tag)-$(TARGET_ENV)
+                serviceBusNamespace=$(SB_NAMESPACE) keyVaultName=$(KEY_VAULT) postgresHost=$(PG_HOST)
+                tenantStoreDatabase=$(TENANTSTORE_DB) keycloakAuthority=$(KEYCLOAK_AUTHORITY)
+                entraTenantId=$(ENTRA_TENANT_ID) allowedAppIds='$(ALLOWED_APP_IDS)'

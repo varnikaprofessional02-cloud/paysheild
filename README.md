@@ -166,3 +166,18 @@ In the demo, each record's signal values are seeded. In production they come fro
 * Data protection, account security, monitoring and compliance controls are listed on the "How PayShield stays secure" page of the proposal PDF.
 
 The demo makes no network calls to any AI service.
+
+## Times Intelligence (AI anomaly detection)
+
+The **Times Intelligence** menu (subscribe, AI anomaly detection, Train model) talks to the PayShield AI service in
+[`times-intelligence/`](times-intelligence/README.md): Python FastAPI + ML, PostgreSQL scripts, .NET client, Azure deploy.
+
+Run it locally (needs Python 3.12 and PostgreSQL; see `times-intelligence/README.md`):
+
+```bash
+cd times-intelligence/payshield-ai
+python -m venv .venv && .venv/Scripts/pip install -r requirements.txt
+.venv/Scripts/python scripts/run_portal_prototype.py --reset   # API on :8080, seeds a demo company
+```
+
+Then `npm run dev` here; Vite forwards `/api` and `/dev` to `:8080` (override with `TI_API`).

@@ -1,0 +1,20 @@
+[project]
+name = "payshield-ai"
+version = "1.0.0"
+description = "PayShield AI - per-company payroll anomaly detection for the Times HR & Payroll platform"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+markers = [
+    "pg: needs a local PostgreSQL (initdb/pg_ctl on PATH or PAYSHIELD_TEST_PG_BIN); skipped otherwise",
+    "slow: trains real models on synthetic data",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning:joblib.*",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"

@@ -1,0 +1,149 @@
+"""LOCAL portal prototype for subscription "prod-is-down".
+
+  python scripts/run_portal_prototype.py --reset     # first time: build DBs + seed, then serve
+  python scripts/run_portal_prototype.py             # later: just serve
+  open http://127.0.0.1:8080/portal/CHPL/dashboard
+
+Databases (local PostgreSQL --port, default 55433):
+  times-tenantstore-local   tenant store (tenant.tenant row for prod-is-down)
+  times-prod-is-down        the subscription DB: real tenant schema + times_intelligence schema (V001)
+The company starts NOT subscribed to Times Intelligence; subscribing happens from the portal page.
+Dev-only helper endpoints (/dev/...) exist only in this script.
+"""
+
+from __future__ import annotations
+
+import argparse
+import shutil
+import subprocess
+import sys
+from datetime import date
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+import psycopg  # noqa: E402
+import uvicorn  # noqa: E402
+from fastapi.responses import HTMLResponse  # noqa: E402
+from psycopg.rows import dict_row  # noqa: E402
+
+from app.core.config import Settings  # noqa: E402
+from app.data.synthetic import generate_company, make_analysis_run  # noqa: E402
+from app.domain.models import CompanyRef  # noqa: E402
+from devtools.seed_tenant import seed_company, seed_lookups, seed_revisions, seed_runs  # noqa: E402
+
+DB = ROOT.parent / "database"
+KEY = "local-demo-only-secret"
+TENANT = "5ab1c0de-0000-4000-8000-0000000000aa"          # subscription uid of prod-is-down
+SUB_DB, TS_DB = "times-prod-is-down", "times-tenantstore-local"
+COMPANY = CompanyRef(1, "c4a1e7f0-0000-4000-8000-00000000c4a1", TENANT, "CHPL")
+MODEL_DIR = Path.home() / ".payshield-tmp" / "models-prod-is-down"
+
+
+def _psql(pg_bin, port, db, file):
+    subprocess.run([str(Path(pg_bin) / "psql"), "-p", str(port), "-U", "postgres", "-d", db, "-q", "-v", "ON_ERROR_STOP=1",
+                    "-f", str(file)], check=True, capture_output=True)
+
+
+def reset(pg_bin: str, port: int) -> None:
+    admin = psycopg.connect(f"host=localhost port={port} user=postgres dbname=postgres", autocommit=True)
+    _psql(pg_bin, port, "postgres", DB / "test/00_create_roles.sql")
+    for db in (TS_DB, SUB_DB):
+        admin.execute(f'DROP DATABASE IF EXISTS "{db}" WITH (FORCE)')
+        admin.execute(f'CREATE DATABASE "{db}"')
+    print("  loading tenant schema + times_intelligence schema into", SUB_DB)
+    for f in ("test/schema/tenant_schema_2026-09-28.sql", "test/01_newer_columns.sql",
+              "migrations/V001__times_intelligence_schema.sql"):
+        _psql(pg_bin, port, SUB_DB, DB / f)
+    _psql(pg_bin, port, TS_DB, DB / "test/02_tenantstore_minimal.sql")
+    with psycopg.connect(f"host=localhost port={port} user=postgres dbname={TS_DB}") as c:
+        c.execute("INSERT INTO tenant.identity_provider (name) VALUES ('Keycloak')")
+        tid = c.execute("INSERT INTO tenant.tenant (identifier, name, db_name, subdomain) VALUES (%s,'prod-is-down',%s,'prod-is-down') "
+                        "RETURNING id", (TENANT, SUB_DB)).fetchone()[0]
+        c.execute("INSERT INTO tenant.tenant_identity_provider (tenant_id, identity_provider_id, instance_code) VALUES (%s,1,'CHPL')", (tid,))
+    print("  seeding 24 months of synthetic payroll for CARLTON HOTEL (SINGAPORE) PTE LTD")
+    sc = generate_company(11, tenant_uid=TENANT, company=COMPANY, n_employees=80)
+    with psycopg.connect(f"host=localhost port={port} user=postgres dbname={SUB_DB}", row_factory=dict_row) as c:
+        seed_lookups(c)
+        seed_company(c, sc)
+        c.execute("UPDATE company.company SET name='CARLTON HOTEL (SINGAPORE) PTE LTD' WHERE id=%s", (COMPANY.id,))
+        c.execute("INSERT INTO times_intelligence.company_setting (company_id, overtime_pay_codes) VALUES (%s, %s)", (COMPANY.id, ["OT15"]))
+    shutil.rmtree(MODEL_DIR, ignore_errors=True)
+
+
+def _next_month(d: date) -> date:
+    return date(d.year + (d.month == 12), d.month % 12 + 1, 1)
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--port", type=int, default=55433)
+    ap.add_argument("--pg-bin", default="C:/Program Files/PostgreSQL/18/bin")
+    ap.add_argument("--reset", action="store_true")
+    args = ap.parse_args()
+    if args.reset:
+        print("resetting prod-is-down databases ...")
+        reset(args.pg_bin, args.port)
+
+    settings = Settings(environment="local", db={"port": args.port, "username": "postgres", "sslmode": "disable",
+                                                  "tenant_store_database": TS_DB},
+                        service_auth={"mode": "shared_secret", "shared_secret": KEY},
+                        storage={"backend": "local", "local_root": str(MODEL_DIR)},
+                        keycloak={"authority": "https://keycloak.invalid"})
+    from app.main import create_app
+
+    app = create_app(settings)
+    dsn = f"host=localhost port={args.port} user=postgres dbname={SUB_DB}"
+
+    @app.get("/portal/CHPL/dashboard", response_class=HTMLResponse)
+    def portal():
+        html = (ROOT / "prototype" / "portal.html").read_text(encoding="utf-8")
+        return html.replace("__KEY__", KEY).replace("__TENANT__", TENANT).replace("__COMPANY__", COMPANY.uid)
+
+    @app.get("/dev/context")
+    def context():
+        return {"tenantUid": TENANT, "companyUid": COMPANY.uid, "companyName": "CARLTON HOTEL (SINGAPORE) PTE LTD",
+                "database": SUB_DB, "demo": True}
+
+    @app.get("/dev/runs")
+    def runs():
+        with psycopg.connect(dsn, row_factory=dict_row) as c:
+            return c.execute("""SELECT r.uid::text AS uid, r.name, pp.value AS period, count(pr.id) AS records
+                FROM payroll.pay_run r JOIN payroll.pay_period pp ON pp.id = r.pay_period_id
+                JOIN payroll.pay_record pr ON pr.pay_run_id = r.id
+                GROUP BY r.id, r.uid, r.name, pp.value ORDER BY to_date(pp.value,'MM/YYYY') DESC, r.id DESC LIMIT 6""").fetchall()
+
+    @app.post("/dev/inject-run")
+    def inject():
+        sc = generate_company(11, tenant_uid=TENANT, company=COMPANY, n_employees=80)
+        with psycopg.connect(dsn, row_factory=dict_row) as c:
+            extra = c.execute("SELECT count(*) AS n FROM payroll.pay_run").fetchone()["n"] - len(sc.runs)
+            last = sc.runs[-1]
+            for _ in range(extra):  # continue after any runs created earlier from this page
+                last = last.__class__(0, "", COMPANY.id, _next_month(last.period), "END", False, last.pay_run_date, "")
+                sc.runs.append(last)
+            users = sorted((u for u in sc.users.values() if u.hired == sc.runs[0].period and not u.loan_until),
+                           key=lambda u: u.user_id)
+            plain = [u for u in users if not u.has_ot and not u.has_meal]
+            k = (extra * 7) % len(plain)
+            plain = iter(plain[k:] + plain[:k])  # different employees each run, so old injections never look normal
+            scen = {next(plain).user_id: s for s in ("salary_increase_no_revision", "duplicate_allowance",
+                                                     "missing_recurring_allowance", "unexpected_net_increase",
+                                                     "new_large_deduction", "cpf_missing", "approved_promotion")}
+            ot = [u for u in users if u.has_ot]
+            scen[ot[extra % len(ot)].user_id] = "unusual_overtime"
+            sc._ids[0] = 2_000_000 + extra * 10_000
+            run, recs, revs = make_analysis_run(sc, scen, seed=100 + extra)
+            seed_revisions(c, sc, revs)
+            seed_runs(c, sc, [run], recs)
+        names = {u.user_id: u.employee_no for u in sc.users.values()}
+        return {"payRunId": run.uid, "period": f"{run.period:%Y-%m}",
+                "injected": [{"employeeNo": names[k], "scenario": v} for k, v in scen.items()]}
+
+    print("open http://127.0.0.1:8080/portal/CHPL/dashboard")
+    uvicorn.run(app, host="127.0.0.1", port=8080, log_level="warning")
+
+
+if __name__ == "__main__":
+    main()

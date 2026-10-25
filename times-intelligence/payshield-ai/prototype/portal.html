@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Times Portal · prod-is-down</title>
+<style>
+  :root { --bg:#f5f6f8; --card:#fff; --ink:#1d2330; --muted:#6b7280; --line:#e5e7eb; --brand:#2f5bea; --brand-50:#eef2ff;
+          --ok:#16a34a; --warn:#d97706; --bad:#dc2626; --crit:#7f1d1d; --low:#3b82f6; --ti:#7c3aed; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:13px/1.45 "Segoe UI",system-ui,sans-serif; color:var(--ink); background:var(--bg); display:flex; min-height:100vh; }
+  aside { width:248px; background:#fff; border-right:1px solid var(--line); display:flex; flex-direction:column; flex-shrink:0; }
+  .co { display:flex; gap:10px; align-items:center; padding:18px 14px 14px; font-weight:600; font-size:15px; line-height:1.15; }
+  .co .logo { width:30px; height:30px; border-radius:6px; background:linear-gradient(135deg,#f59e0b,#b45309); flex-shrink:0; }
+  .plan { padding:8px 14px; font-size:11px; color:var(--muted); font-weight:600; }
+  nav a { display:flex; align-items:center; gap:10px; padding:8px 14px; margin:1px 6px; border-radius:6px; color:var(--ink); text-decoration:none; font-size:13.5px; cursor:pointer; }
+  nav a:hover { background:#f3f4f6; } nav a.on { background:var(--brand-50); font-weight:600; }
+  .sec { padding:16px 14px 6px; font-size:11px; font-weight:700; color:#374151; letter-spacing:.3px; display:flex; justify-content:space-between; }
+  .ico { width:18px; text-align:center; }
+  .ti-sec .sec { color:var(--ti); }
+  .new { background:var(--ti); color:#fff; font-size:9px; padding:1px 5px; border-radius:4px; margin-left:auto; }
+  .subscribe { margin:16px 12px; padding:12px; border-radius:10px; background:linear-gradient(135deg,#ede9fe,#e0e7ff); border:1px solid #ddd6fe; }
+  .subscribe b { display:block; font-size:13px; color:#4c1d95; } .subscribe p { margin:4px 0 10px; color:#5b21b6; font-size:12px; }
+  .foot { margin-top:auto; padding:12px 14px; color:var(--muted); font-size:11px; }
+  .main { flex:1; min-width:0; }
+  .top { background:#fff; border-bottom:1px solid var(--line); padding:12px 24px; display:flex; justify-content:space-between; align-items:center; }
+  .top .who { display:flex; align-items:center; gap:10px; } .avatar { width:32px; height:32px; border-radius:50%; background:#cbd5e1; display:grid; place-items:center; font-weight:700; }
+  .content { padding:20px 24px; display:grid; gap:16px; }
+  .grid { display:grid; grid-template-columns:2fr 1.35fr 1fr; gap:16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px 18px; }
+  .card h3 { margin:0 0 10px; font-size:14px; display:flex; justify-content:space-between; align-items:center; }
+  .muted { color:var(--muted); } .link { color:var(--brand); cursor:pointer; font-weight:500; }
+  .hello h2 { margin:6px 0; font-size:20px; }
+  .weather { border:1px solid var(--line); border-radius:8px; padding:12px; margin-top:12px; }
+  .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .kpis { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }
+  .kpi { border:1px solid var(--line); border-radius:8px; padding:12px; } .kpi .v { font-size:24px; font-weight:700; } .kpi .l { color:var(--muted); font-size:12px; }
+  .list div { padding:9px 0; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; }
+  button { background:var(--brand); color:#fff; border:0; border-radius:7px; padding:8px 14px; font-weight:600; cursor:pointer; font-size:13px; }
+  button.ti { background:var(--ti); } button.ghost { background:#fff; color:var(--brand); border:1px solid var(--brand); }
+  button:disabled { opacity:.55; cursor:wait; }
+  table { width:100%; border-collapse:collapse; } th, td { text-align:left; padding:8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--muted); font-size:11.5px; font-weight:600; }
+  .sev { padding:2px 8px; border-radius:99px; color:#fff; font-size:11px; font-weight:700; }
+  .LOW{background:var(--low)} .MEDIUM{background:var(--warn)} .HIGH{background:var(--bad)} .CRITICAL{background:var(--crit)}
+  .bar { height:8px; background:var(--line); border-radius:4px; overflow:hidden; width:120px; display:inline-block; vertical-align:middle; }
+  .bar i { display:block; height:100%; background:var(--ti); }
+  .toast { position:fixed; top:18px; right:18px; background:#065f46; color:#fff; padding:12px 16px; border-radius:8px; box-shadow:0 6px 20px rgba(0,0,0,.18); display:none; z-index:9; }
+  .steps { display:flex; gap:8px; margin:6px 0 14px; } .steps span { padding:4px 10px; border-radius:99px; background:#f3f4f6; color:var(--muted); font-size:12px; }
+  .steps span.on { background:#ede9fe; color:#5b21b6; font-weight:600; } .steps span.done { background:#dcfce7; color:#166534; }
+  .log { font:12px ui-monospace,Consolas,monospace; background:#0b1020; color:#cbd5e1; border-radius:8px; padding:10px; max-height:120px; overflow:auto; white-space:pre-wrap; }
+  .tag { background:#f5f3ff; color:#5b21b6; padding:1px 6px; border-radius:4px; font-size:11px; }
+  .answer { white-space:pre-wrap; background:#f9fafb; border:1px solid var(--line); border-radius:8px; padding:10px; margin-top:10px; }
+  input[type=text], select { padding:8px 10px; border:1px solid var(--line); border-radius:7px; font-size:13px; }
+  input[type=text] { flex:1; min-width:260px; }
+  .view { display:none; } .view.on { display:grid; gap:16px; }
+  .lock { text-align:center; padding:40px; }
+</style>
+</head>
+<body>
+<aside>
+  <div class="co"><div class="logo"></div>CARLTON HOTEL (SINGAPORE) PTE LTD</div>
+  <div class="plan">BASIC v5</div>
+  <nav>
+    <a class="on" data-view="dashboard"><span class="ico">▦</span>Dashboard</a>
+    <a><span class="ico">▤</span>Company Policy</a>
+  </nav>
+  <div class="sec">PRODUCT <span>⌃</span></div>
+  <nav>
+    <a><span class="ico" style="color:#10b981">✣</span>EPM</a>
+    <a><span class="ico" style="color:#16a34a">◯</span>Pay</a>
+    <a><span class="ico" style="color:#ef4444">✕</span>Leave</a>
+    <a><span class="ico" style="color:#6366f1">◑</span>IRAS</a>
+    <a><span class="ico" style="color:#f59e0b">◐</span>Claim</a>
+    <a><span class="ico" style="color:#2563eb">◆</span>Query Builder</a>
+  </nav>
+  <div id="tiMenu" class="ti-sec" style="display:none">
+    <div class="sec">TIMES INTELLIGENCE <span class="new">NEW</span></div>
+    <nav>
+      <a data-view="payshield"><span class="ico">🛡</span>PayShield</a>
+      <a data-view="train"><span class="ico">⚙</span>Train Model</a>
+    </nav>
+    <div style="padding:6px 14px"><button class="ghost" id="btnUnsubscribe" style="width:100%;color:#b91c1c;border-color:#fca5a5">Unsubscribe</button></div>
+  </div>
+  <div id="subBox" class="subscribe">
+    <b>✦ Times Intelligence</b>
+    <p>AI payroll anomaly detection trained privately on your company's data.</p>
+    <button class="ti" id="btnSubscribe" style="width:100%">Subscribe to Times Intelligence</button>
+  </div>
+  <div class="foot">© 1998 - 2026 Times Software</div>
+</aside>
+
+<div class="main">
+  <div class="top">
+    <div><div class="muted">Welcome back, Thilanka Potter!</div><b>October, 2026</b></div>
+    <div class="who">🔔<div class="avatar">TP</div><div><b>Thilanka Potter</b><div class="muted" style="font-size:11px">Designation 4</div></div></div>
+  </div>
+
+  <div class="content">
+    <!-- DASHBOARD (static copy of the current portal) -->
+    <section class="view on" id="v-dashboard">
+      <div class="grid">
+        <div class="card hello">
+          <div class="muted">📅 Saturday, 17 October 2026</div>
+          <h2>Good evening, Thilanka Potter</h2>
+          <div class="muted">You have <b>5 pending approvals</b> and <b>2 events</b> coming up this week. 8 people are out today.</div>
+          <div class="weather"><div class="row"><span style="font-size:26px">⛅</span><b style="font-size:22px">31°</b><span class="muted">Partly cloudy · Singapore · H 32° L 26°</span></div>
+            <div class="muted" style="margin-top:8px">☂ Thunderstorms expected around 6 PM. Bring an umbrella.</div></div>
+        </div>
+        <div class="card"><h3>🕘 My Workday <span class="tag" style="background:#dcfce7;color:#166534">Clocked in</span></h3>
+          <div class="list"><div><span class="muted">CLOCK IN</span><b>09:02 AM</b></div><div><span class="muted">SHIFT</span><b>9:00 – 18:00</b></div>
+          <div><span class="muted">THIS WEEK</span><b>36h 10m</b></div></div>
+          <div style="text-align:right;margin-top:10px"><button style="background:#dc2626">Clock out</button></div>
+        </div>
+        <div class="card"><h3>🔗 Quick Links <span class="link">Edit</span></h3>
+          <div class="list"><div>Apply Leave<span>›</span></div><div>Submit Claim<span>›</span></div><div>My Payslips<span>›</span></div><div>Timesheet<span>›</span></div><div>Employee Directory<span>›</span></div></div>
+        </div>
+      </div>
+      <div class="grid" style="grid-template-columns:1fr 1fr 1fr">
+        <div class="card"><h3>Pending Approvals <span class="link">View all</span></h3>
+          <div class="list"><div><span><b>Daniel Tan</b><br><span class="muted">Leave · Annual leave · 13–15 Oct</span></span><span>✓ ✕</span></div>
+          <div><span><b>Shalini Chandran</b><br><span class="muted">Leave · Half day (PM) · 9 Oct</span></span><span>✓ ✕</span></div>
+          <div><span><b>Kevin Lim</b><br><span class="muted">Claim · S$248.60 · Client lunch</span></span><span>✓ ✕</span></div></div></div>
+        <div class="card"><h3>📣 Announcements</h3>
+          <p><b>Q4 Town Hall on 14 Oct</b><br><span class="muted">Join the CEO for the quarterly update, Level 12 auditorium or via Teams.</span></p>
+          <p><b>2027 medical benefits enrolment opens</b><br><span class="muted">Review your coverage before 31 Oct.</span></p></div>
+        <div class="card"><h3>My Leave Balance <span class="link">Apply leave</span></h3>
+          <div class="list"><div>Annual leave<b>12 of 18 days</b></div><div>Medical leave<b>11 / 14 days</b></div><div>Childcare leave<b>4 / 6 days</b></div></div></div>
+      </div>
+      <div class="card"><h3>📊 HR Analytics</h3>
+        <div class="kpis"><div class="kpi"><div class="l">Headcount</div><div class="v" style="color:#2563eb">248</div></div>
+          <div class="kpi"><div class="l">New hires</div><div class="v" style="color:#16a34a">9</div></div>
+          <div class="kpi"><div class="l">Attrition</div><div class="v" style="color:#ea580c">1.3%</div></div>
+          <div class="kpi"><div class="l">Open roles</div><div class="v" style="color:#7c3aed">12</div></div></div></div>
+    </section>
+
+    <!-- TRAIN MODEL -->
+    <section class="view" id="v-train">
+      <div class="card">
+        <h3>⚙ Train PayShield model <span class="muted" style="font-weight:400">Times Intelligence · CARLTON HOTEL (SINGAPORE) PTE LTD</span></h3>
+        <p class="muted">The model is trained only on this company's payroll history inside the <b>times-prod-is-down</b> database. It is compared with a robust statistical baseline on the most recent months with injected anomalies, and the better detector is activated if it passes the quality gate.</p>
+        <div class="steps" id="trainSteps"><span>1 · Read payroll history</span><span>2 · Build features</span><span>3 · Train</span><span>4 · Evaluate</span><span>5 · Activate</span></div>
+        <div class="row"><button class="ti" id="btnTrain">Train model</button><span id="trainState" class="muted"></span></div>
+      </div>
+      <div id="modelCard"></div>
+      <div class="card"><h3>Model versions</h3><div id="versions" class="muted">No models yet.</div></div>
+    </section>
+
+    <!-- PAYSHIELD -->
+    <section class="view" id="v-payshield">
+      <div class="card">
+        <h3>🛡 PayShield · Payroll risk review</h3>
+        <p class="muted">Findings are advisory — approvals and finalisation stay in Pay. Risk score is a priority rank, not a probability.</p>
+        <div class="row">
+          <select id="runs"></select>
+          <button id="btnAnalyze">Analyse pay run</button>
+          <button class="ghost" id="btnInject" title="prototype helper">+ Test run with anomalies</button>
+        </div>
+        <div id="injected"></div>
+      </div>
+      <div id="analysis"></div>
+      <div class="card">
+        <h3>✦ Ask PayShield</h3>
+        <div class="row"><input type="text" id="q" value="What are the highest-risk payroll anomalies this month?"><button class="ti" id="btnAsk">Ask</button></div>
+        <div class="row" style="margin-top:8px">
+          <button class="ghost" data-q="How many employees have unusual overtime?">Overtime count</button>
+          <button class="ghost" data-q="Summarize payroll risks before finalization.">Summary</button>
+          <button class="ghost" data-q="Approve the payroll now">Try: approve payroll</button>
+        </div>
+        <div id="answer"></div>
+      </div>
+    </section>
+
+    <div class="card"><h3>Activity</h3><div class="log" id="log"></div></div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const H = { "X-PayShield-Service-Key": "__KEY__", "X-Tenant-Uid": "__TENANT__", "X-Company-Uid": "__COMPANY__", "Content-Type": "application/json" };
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const money = v => v == null ? "—" : Number(v).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+const log = m => { $("log").textContent = `${new Date().toLocaleTimeString()}  ${m}\n` + $("log").textContent; };
+let lastAnalysis = null;
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, { headers: H, ...opts });
+  const b = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(`${r.status} ${b.code || ""} ${b.detail || ""}`);
+  return b;
+}
+async function busy(btn, fn) { btn.disabled = true; try { await fn(); } catch (e) { log("ERROR " + e.message); } finally { btn.disabled = false; } }
+function toast(msg) { const t = $("toast"); t.textContent = msg; t.style.display = "block"; setTimeout(() => t.style.display = "none", 3500); }
+
+function show(view) {
+  document.querySelectorAll(".view").forEach(v => v.classList.toggle("on", v.id === "v-" + view));
+  document.querySelectorAll("nav a[data-view]").forEach(a => a.classList.toggle("on", a.dataset.view === view));
+  if (view === "train") refreshModel();
+  if (view === "payshield") loadRuns();
+}
+document.querySelectorAll("nav a[data-view]").forEach(a => a.onclick = () => show(a.dataset.view));
+
+function applySubscription(s) {
+  $("tiMenu").style.display = s.subscribed ? "block" : "none";
+  $("subBox").style.display = s.subscribed ? "none" : "block";
+}
+$("btnSubscribe").onclick = () => busy($("btnSubscribe"), async () => {
+  const s = await api("/api/v1/intelligence/subscribe", { method: "POST" });
+  applySubscription(s);
+  toast("✓ Successfully subscribed to Times Intelligence");
+  log("subscribed: modules " + s.modules.join(", "));
+});
+
+$("btnUnsubscribe").onclick = () => busy($("btnUnsubscribe"), async () => {
+  if (!confirm("Unsubscribe from Times Intelligence? PayShield will stop analysing payroll. Trained models and past analyses are kept.")) return;
+  const s = await api("/api/v1/intelligence/unsubscribe", { method: "POST" });
+  applySubscription(s);
+  show("dashboard");
+  toast("Unsubscribed from Times Intelligence");
+  log("unsubscribed");
+});
+
+/* ---------------- train ---------------- */
+function setSteps(n, done) {
+  [...$("trainSteps").children].forEach((s, i) => s.className = done || i < n ? "done" : i === n ? "on" : "");
+}
+async function refreshModel() {
+  const s = await api("/api/v1/models/status"), m = s.activeModel, j = s.latestJob;
+  if (!m) { $("modelCard").innerHTML = `<div class="card muted">No active model yet${j ? " — last job " + j.status : ""}. Click <b>Train model</b>.</div>`; }
+  else {
+    const ev = m.evaluationMetrics, d = ev.detectors || {};
+    $("modelCard").innerHTML = `<div class="card"><h3>Active model <span class="tag">v${m.modelVersion}</span></h3>
+      <div class="kpis">
+        <div class="kpi"><div class="l">Chosen detector</div><div class="v" style="font-size:16px">${m.detector.replace("_"," ")}</div></div>
+        <div class="kpi"><div class="l">Training observations</div><div class="v">${m.trainingRecordCount.toLocaleString()}</div></div>
+        <div class="kpi"><div class="l">Training period</div><div class="v" style="font-size:16px">${m.trainingPeriodStart.slice(0,7)} → ${m.trainingPeriodEnd.slice(0,7)}</div></div>
+        <div class="kpi"><div class="l">Training time</div><div class="v">${j && j.durationMs ? (j.durationMs/1000).toFixed(1)+"s" : "—"}</div></div></div>
+      <table style="margin-top:12px"><tr><th>Detector</th><th>ROC-AUC</th><th>Recall at alert</th><th>False alerts on clean data</th></tr>
+      ${Object.entries(d).map(([k,v]) => `<tr><td>${k===ev.champion?"✓ <b>"+k+"</b>":k}</td><td>${v.roc_auc}</td>
+        <td><span class="bar"><i style="width:${v.recall_at_alert*100}%"></i></span> ${(v.recall_at_alert*100).toFixed(1)}%</td><td>${(v.clean_alert_rate*100).toFixed(1)}%</td></tr>`).join("")}</table>
+      <p class="muted">Evaluated on ${ev.n_validation_rows} clean rows + ${ev.n_injected} injected anomalies (synthetic). Gate: ${esc(j?.gate?.reason)}.</p></div>`;
+  }
+  const v = await api("/api/v1/models/versions");
+  $("versions").innerHTML = v.models.length ? `<table><tr><th>Version</th><th>Status</th><th>Detector</th><th>Records</th><th>Trained</th><th></th></tr>${
+    v.models.map(x => `<tr><td>${x.modelVersion}</td><td>${x.status}</td><td>${x.detector}</td><td>${x.trainingRecordCount}</td>
+      <td>${x.trainingCompletedAt.slice(0,19).replace("T"," ")}</td>
+      <td>${x.status !== "ACTIVE" && x.status !== "REJECTED" ? `<span class="link" onclick="activate('${x.modelId}')">Roll back to this</span>` : ""}</td></tr>`).join("")}</table>` : "No models yet.";
+}
+async function activate(id) { try { await api(`/api/v1/models/${id}/activate`, { method: "POST" }); toast("Model activated"); refreshModel(); } catch (e) { log("ERROR " + e.message); } }
+$("btnTrain").onclick = () => busy($("btnTrain"), async () => {
+  setSteps(0);
+  const job = await api("/api/v1/models/train", { method: "POST", body: "{}" });
+  log("training job " + job.jobId + " queued");
+  let tick = 0;
+  for (;;) {
+    const j = await api(`/api/v1/models/training-jobs/${job.jobId}`);
+    $("trainState").textContent = "Job: " + j.status;
+    if (!["QUEUED","RUNNING"].includes(j.status)) { setSteps(5, j.status === "SUCCEEDED"); log(`training ${j.status} in ${(j.durationMs/1000).toFixed(1)}s`); break; }
+    setSteps(Math.min(4, 1 + Math.floor(tick++ / 3)));
+    await new Promise(r => setTimeout(r, 1200));
+  }
+  toast("Model training finished");
+  await refreshModel();
+});
+
+/* ---------------- payshield ---------------- */
+async function loadRuns(select) {
+  const runs = await (await fetch("/dev/runs")).json();
+  $("runs").innerHTML = runs.map(r => `<option value="${r.uid}">${esc(r.name)} · ${r.period} · ${r.records} employees</option>`).join("");
+  if (select) $("runs").value = select;
+}
+$("btnInject").onclick = () => busy($("btnInject"), async () => {
+  const r = await (await fetch("/dev/inject-run", { method: "POST" })).json();
+  $("injected").innerHTML = `<p class="muted" style="margin-top:10px">Test run ${r.period} created. Injected: ${r.injected.map(i => `<span class="tag">${i.employeeNo} · ${i.scenario}</span>`).join(" ")}</p>`;
+  log("created test run " + r.period);
+  await loadRuns(r.payRunId);
+});
+$("btnAnalyze").onclick = () => busy($("btnAnalyze"), async () => {
+  const a = await api("/api/v1/payroll/analyze", { method: "POST", body: JSON.stringify({ payRunId: $("runs").value }) });
+  lastAnalysis = a;
+  log(`analysis ${a.status}: ${a.anomalyCount} findings`);
+  $("analysis").innerHTML = `<div class="card"><h3>Analysis · ${a.payrollPeriod} <span class="tag">model ${a.modelVersion || "none"} · ${a.mlStatus}</span></h3>
+    <div class="kpis"><div class="kpi"><div class="l">Status</div><div class="v" style="font-size:16px">${a.status}</div></div>
+      <div class="kpi"><div class="l">Employees flagged</div><div class="v">${a.flaggedEmployees} / ${a.totalEmployees}</div></div>
+      <div class="kpi"><div class="l">Findings</div><div class="v">${a.anomalyCount}</div></div>
+      <div class="kpi"><div class="l">Highest severity</div><div class="v" style="font-size:16px">${a.maxSeverity || "—"}</div></div></div>
+    ${a.warnings.length ? `<p class="muted">${a.warnings.map(esc).join("; ")}</p>` : ""}
+    <table style="margin-top:10px"><tr><th>Severity</th><th>Risk</th><th>Employee</th><th>Type</th><th>Finding</th><th>Current</th><th>Expected</th></tr>
+    ${a.anomalies.map(x => `<tr><td><span class="sev ${x.severity}">${x.severity}</span></td><td><b>${x.riskScore}</b></td><td>${x.employeeNo}</td>
+      <td>${x.anomalyType.replaceAll("_"," ")}<br><span class="muted">${x.source}${x.ruleId ? " · " + x.ruleId : ""}</span></td>
+      <td>${esc(x.description)}<br><span class="muted">→ ${esc(x.recommendedAction)}</span></td>
+      <td>${money(x.currentValue)}</td><td>${money(x.expectedValue)}</td></tr>`).join("")}</table></div>`;
+});
+async function ask(q) {
+  if (!lastAnalysis) { log("analyse a pay run first"); return; }
+  const r = await api("/api/v1/assistant/ask", { method: "POST", body: JSON.stringify({ question: q, analysisId: lastAnalysis.analysisId }) });
+  $("answer").innerHTML = `<div class="answer"><b>[${r.status}]</b> ${esc(r.answer)}</div>`;
+}
+$("btnAsk").onclick = () => busy($("btnAsk"), () => ask($("q").value));
+document.querySelectorAll("[data-q]").forEach(b => b.onclick = () => { $("q").value = b.dataset.q; busy(b, () => ask(b.dataset.q)); });
+
+api("/api/v1/intelligence/subscription").then(applySubscription).catch(e => log("ERROR " + e.message));
+</script>
+</body>
+</html>
