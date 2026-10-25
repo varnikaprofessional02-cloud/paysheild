@@ -31,6 +31,7 @@ from psycopg.rows import dict_row  # noqa: E402
 from app.core.config import Settings  # noqa: E402
 from app.data.synthetic import generate_company, make_analysis_run  # noqa: E402
 from app.domain.models import CompanyRef  # noqa: E402
+from devtools.seed_identity import change_identity, seed_identity  # noqa: E402
 from devtools.seed_tenant import seed_company, seed_lookups, seed_revisions, seed_runs  # noqa: E402
 
 DB = ROOT.parent / "database"
@@ -46,7 +47,7 @@ def _psql(pg_bin, port, db, file):
                     "-f", str(file)], check=True, capture_output=True)
 
 
-def reset(pg_bin: str, port: int) -> None:
+def reset(pg_bin: str, port: int, n_employees: int) -> None:
     admin = psycopg.connect(f"host=localhost port={port} user=postgres dbname=postgres", autocommit=True)
     _psql(pg_bin, port, "postgres", DB / "test/00_create_roles.sql")
     for db in (TS_DB, SUB_DB):
@@ -54,7 +55,7 @@ def reset(pg_bin: str, port: int) -> None:
         admin.execute(f'CREATE DATABASE "{db}"')
     print("  loading tenant schema + times_intelligence schema into", SUB_DB)
     for f in ("test/schema/tenant_schema_2026-09-28.sql", "test/01_newer_columns.sql",
-              "migrations/V001__times_intelligence_schema.sql"):
+              "migrations/V001__times_intelligence_schema.sql", "migrations/V002__training_areas.sql"):
         _psql(pg_bin, port, SUB_DB, DB / f)
     _psql(pg_bin, port, TS_DB, DB / "test/02_tenantstore_minimal.sql")
     with psycopg.connect(f"host=localhost port={port} user=postgres dbname={TS_DB}") as c:
@@ -62,12 +63,14 @@ def reset(pg_bin: str, port: int) -> None:
         tid = c.execute("INSERT INTO tenant.tenant (identifier, name, db_name, subdomain) VALUES (%s,'prod-is-down',%s,'prod-is-down') "
                         "RETURNING id", (TENANT, SUB_DB)).fetchone()[0]
         c.execute("INSERT INTO tenant.tenant_identity_provider (tenant_id, identity_provider_id, instance_code) VALUES (%s,1,'CHPL')", (tid,))
-    print("  seeding 24 months of synthetic payroll for CARLTON HOTEL (SINGAPORE) PTE LTD")
-    sc = generate_company(11, tenant_uid=TENANT, company=COMPANY, n_employees=80)
+    print(f"  seeding 24 months of synthetic payroll for CARLTON HOTEL (SINGAPORE) PTE LTD: {n_employees} employees")
+    sc = generate_company(11, tenant_uid=TENANT, company=COMPANY, n_employees=n_employees)
     with psycopg.connect(f"host=localhost port={port} user=postgres dbname={SUB_DB}", row_factory=dict_row) as c:
         seed_lookups(c)
         seed_company(c, sc)
         c.execute("UPDATE company.company SET name='CARLTON HOTEL (SINGAPORE) PTE LTD' WHERE id=%s", (COMPANY.id,))
+        print("  seeding identity data (NRIC/FIN, work passes, bank accounts) with planted problems:",
+              seed_identity(c, sc, COMPANY.id))
         c.execute("INSERT INTO times_intelligence.company_setting (company_id, overtime_pay_codes) VALUES (%s, %s)", (COMPANY.id, ["OT15"]))
     shutil.rmtree(MODEL_DIR, ignore_errors=True)
 
@@ -81,10 +84,11 @@ def main() -> None:
     ap.add_argument("--port", type=int, default=55433)
     ap.add_argument("--pg-bin", default="C:/Program Files/PostgreSQL/18/bin")
     ap.add_argument("--reset", action="store_true")
+    ap.add_argument("--employees", type=int, default=80, help="employees to seed with --reset (use the same value when serving)")
     args = ap.parse_args()
     if args.reset:
         print("resetting prod-is-down databases ...")
-        reset(args.pg_bin, args.port)
+        reset(args.pg_bin, args.port, args.employees)
 
     settings = Settings(environment="local", db={"port": args.port, "username": "postgres", "sslmode": "disable",
                                                   "tenant_store_database": TS_DB},
@@ -116,7 +120,7 @@ def main() -> None:
 
     @app.post("/dev/inject-run")
     def inject():
-        sc = generate_company(11, tenant_uid=TENANT, company=COMPANY, n_employees=80)
+        sc = generate_company(11, tenant_uid=TENANT, company=COMPANY, n_employees=args.employees)
         with psycopg.connect(dsn, row_factory=dict_row) as c:
             extra = c.execute("SELECT count(*) AS n FROM payroll.pay_run").fetchone()["n"] - len(sc.runs)
             last = sc.runs[-1]
@@ -137,9 +141,10 @@ def main() -> None:
             run, recs, revs = make_analysis_run(sc, scen, seed=100 + extra)
             seed_revisions(c, sc, revs)
             seed_runs(c, sc, [run], recs)
+            ident = change_identity(c, sc, extra)
         names = {u.user_id: u.employee_no for u in sc.users.values()}
         return {"payRunId": run.uid, "period": f"{run.period:%Y-%m}",
-                "injected": [{"employeeNo": names[k], "scenario": v} for k, v in scen.items()]}
+                "injected": [{"employeeNo": names[k], "scenario": v} for k, v in scen.items()] + ident}
 
     print("open http://127.0.0.1:8080/portal/CHPL/dashboard")
     uvicorn.run(app, host="127.0.0.1", port=8080, log_level="warning")

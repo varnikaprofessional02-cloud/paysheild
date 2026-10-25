@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import shutil
 import io
 import re
 import uuid
@@ -91,6 +92,13 @@ class LocalArtifactStore:
         return _check(tenant_uid, company_uid, storage_location, data, expected_sha256)
 
 
+    def delete_company(self, tenant_uid, company_uid) -> int:
+        path = self.root / f"tenants/{_guid(tenant_uid)}/companies/{_guid(company_uid)}"
+        n = sum(1 for f in path.rglob("*") if f.is_file()) if path.exists() else 0
+        shutil.rmtree(path, ignore_errors=True)
+        return n
+
+
 class AzureBlobArtifactStore:
     def __init__(self, container_client):
         self.container = container_client
@@ -106,6 +114,14 @@ class AzureBlobArtifactStore:
             raise ArtifactIntegrityError("artifact location outside tenant/company scope")
         data = self.container.download_blob(storage_location).readall()
         return _check(tenant_uid, company_uid, storage_location, data, expected_sha256)
+
+
+    def delete_company(self, tenant_uid, company_uid) -> int:
+        prefix = f"tenants/{_guid(tenant_uid)}/companies/{_guid(company_uid)}/"
+        names = [b.name for b in self.container.list_blobs(name_starts_with=prefix)]
+        for n in names:
+            self.container.delete_blob(n)
+        return len(names)
 
 
 def build_artifact_store(storage):
