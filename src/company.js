@@ -7,7 +7,7 @@ import { MODEL_V1 } from './model.js';
 
 const ENV = (typeof import.meta !== 'undefined' && import.meta.env) || {};
 export const COMPANY = {
-  name: ENV.VITE_COMPANY || 'Times Software Pte Ltd',
+  name: ENV.VITE_COMPANY || 'Marina Bay Sands',
   get letter() { return this.name.trim()[0].toUpperCase(); },
 };
 export const RUN = { name: 'September 2026', payDate: '30 Sep 2026', headcount: 219, gross: 1284560, checksPerPerson: 30 };
@@ -114,7 +114,7 @@ export const ISSUES = () => [
   // People & Employment
   I({ id: 'lim', ref: 'MOM: final salary is due on the last day of employment; no pay after it', hist: 'Final pay of S$4,200 settled in the 31 Aug run', guard: 'people', name: 'Lim Hui Ling', ini: 'LH', dept: 'Finance', ...seeded({ pay: 0.9, attendance: 0.48 }, { critical: true, forceHold: true }),
     title: 'Resigned, last day 31 Aug, but still in the September run', param: ['Last working day', '31 Aug 2026', 'pay period starts 1 Sep'], impact: 4200,
-    fix: { label: 'Remove from this run', removes: true, done: 'Removed from this run. Her final pay was settled on 31 Aug.' }, alt: { label: 'Keep: rehired', done: 'Kept with HR note: rehired from 1 Sep.' } }),
+    fix: { label: 'Remove from this run', done: 'Removed. Her final pay was settled on 31 Aug.' }, alt: { label: 'Keep: rehired', done: 'Kept with HR note: rehired from 1 Sep.' } }),
   I({ id: 'karthik', ref: 'MOM: a valid work pass is needed to employ; pay for an incomplete month uses the MOM formula', hist: 'Paid S$2,400 in each of the last 6 runs', guard: 'people', name: 'Karthik Subramaniam', ini: 'KS', dept: 'Security', ...seeded({ pay: 0.3 }, { critical: true }),
     title: 'Work permit expires 20 Sep; no renewal on file, but paid for the full month', param: ['Work pass valid to', '20 Sep 2026', 'paid to 30 Sep'],
     impact: round2(2400 - prorate(2400, 14, SEP_WORKING_DAYS)),
@@ -192,9 +192,6 @@ export const HIGH_RISK_GUARDS = ['bank', 'compliance'];
 export const guardOff = (key) => !!GUARD_SWITCH.off[key];
 export function setGuardOff(key, info) { if (info) GUARD_SWITCH.off[key] = info; else delete GUARD_SWITCH.off[key]; }
 export const resetGuards = () => { GUARD_SWITCH.off = {}; };
-/** True when a resolved finding took the person out of the pay run (a warning, not a success). */
-export const isRemoval = (i) => i.state === 'excluded' || (i.state === 'fixed' && !!(i.fix && i.fix.removes));
-export const kindRemoves = (i, kind) => kind === 'hold' || (kind === 'fix' && !!(i.fix && i.fix.removes));
 export const pendingIn = (issues, guard) => issues.filter((i) => i.state === 'open' && !guardOff(i.guard) && (!guard || i.guard === guard));
 export function runSummary(issues) {
   const open = pendingIn(issues);

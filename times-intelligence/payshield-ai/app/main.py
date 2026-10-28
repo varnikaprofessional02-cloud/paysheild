@@ -19,6 +19,7 @@ from app.core.security import Authenticator, JwksCache, VerifiedService
 from app.core.tenant_context import TenantContext, TenantInfo
 from app.db.connection import ConnectionManager
 from app.db.lookup_repository import PostgresLookupRepository
+from app.nl2sql.service import Nl2SqlService
 from app.db.payroll_repository import PostgresPayrollReadRepository
 from app.db.payshield_repository import PostgresPayShieldRepository
 from app.db.tenant_resolver import PostgresTenantResolver
@@ -108,6 +109,9 @@ class Runtime:
 
     def lookup(self, t: TenantInfo) -> PostgresLookupRepository:
         return PostgresLookupRepository(self.conn, t.db_name)
+
+    def nl2sql(self, t: TenantInfo) -> Nl2SqlService:
+        return Nl2SqlService(self.conn, t.db_name)
 
     def service(self, ctx: TenantContext) -> PayShieldService:
         repo = PostgresPayShieldRepository(self.conn, ctx.tenant.db_name)
@@ -398,6 +402,11 @@ def create_app(settings: Settings | None = None, runtime: Runtime | None = None)
         if h is None:
             raise NotFound("EMPLOYEE_NOT_FOUND", f"No employee {employee_no} in this company.")
         return h
+
+    # plain-English question -> catalogue intent -> fixed read-only SQL -> rows (no LLM; see app/nl2sql)
+    @app.post(p + "/nl2sql/ask")
+    def nl2sql_ask(body: QuestionRequest, ctx: TenantContext = Depends(viewer)):
+        return rt.nl2sql(ctx.tenant).ask(ctx.company_id, body.question)
 
     @app.get(p + "/lookup/pay-runs/totals")
     def lookup_totals(limit: int = 6, ctx: TenantContext = Depends(viewer)):

@@ -1,0 +1,76 @@
+# Held-out questions for text -> SQL: never used for training, worded differently from templates.yaml.
+# today: the date relative months ("last month") are resolved against.
+# Each case: q, intent, optional expected slots (period as YYYY-MM).
+today: 2026-10-28
+cases:
+- {q: "What's the total net salary we paid in September?", intent: net_pay_total, period: 2026-09}
+- {q: "net pay total for 08/2026", intent: net_pay_total, period: 2026-08}
+- {q: "How much did staff take home last month in total?", intent: net_pay_total, period: 2026-09}
+- {q: "overall nett salary paid out in October 2026", intent: net_pay_total, period: 2026-10}
+- {q: "Can you summarise the payroll costs for August?", intent: payroll_summary, period: 2026-08}
+- {q: "full payroll cost breakdown last month", intent: payroll_summary, period: 2026-09}
+- {q: "basic, allowance, deduction and CPF totals for Oct", intent: payroll_summary, period: 2026-10}
+- {q: "Who were our 5 best paid employees in September?", intent: top_earners, period: 2026-09, n: 5}
+- {q: "top 15 earners last month", intent: top_earners, period: 2026-09, n: 15}
+- {q: "which staff had the biggest pay this month", intent: top_earners, period: 2026-10}
+- {q: "How much employer CPF did we pay in August 2026?", intent: cpf_totals, period: 2026-08}
+- {q: "CPF contribution totals last month", intent: cpf_totals, period: 2026-09}
+- {q: "what's the amount payable to CPF board for October", intent: cpf_totals, period: 2026-10}
+- {q: "Which employees did over 72 hours of overtime in September?", intent: ot_over_hours, period: 2026-09, amount: 72}
+- {q: "staff whose OT hours are more than 60 last month", intent: ot_over_hours, period: 2026-09, amount: 60}
+- {q: "anyone breaking the 72 hour overtime cap", intent: ot_over_hours, amount: 72}
+- {q: "What was the overtime bill in August?", intent: ot_total, period: 2026-08}
+- {q: "overtime paid per employee last month", intent: ot_total, period: 2026-09}
+- {q: "total OT hours and OT pay for Oct", intent: ot_total, period: 2026-10}
+- {q: "Has the October pay run been locked yet?", intent: pay_run_status, period: 2026-10}
+- {q: "status of last month's payroll run", intent: pay_run_status, period: 2026-09}
+- {q: "show me the pay runs in 08/2026", intent: pay_run_status, period: 2026-08}
+- {q: "How has net pay trended over the last 6 months?", intent: net_pay_trend, n: 6}
+- {q: "monthly payroll totals for the past 12 months", intent: net_pay_trend, n: 12}
+- {q: "payroll per month", intent: net_pay_trend}
+- {q: "How did September payroll compare with August?", intent: month_change, period: 2026-09}
+- {q: "change in payroll from last month to this month", intent: month_change}
+- {q: "is payroll up compared to the previous month", intent: month_change}
+- {q: "What deductions came out of salaries in September?", intent: deductions_by_code, period: 2026-09}
+- {q: "deduction totals by pay code for last month", intent: deductions_by_code, period: 2026-09}
+- {q: "list every deduction code and its amount this month", intent: deductions_by_code, period: 2026-10}
+- {q: "Which allowances did we pay out in August?", intent: allowances_by_code, period: 2026-08}
+- {q: "allowance totals by code last month", intent: allowances_by_code, period: 2026-09}
+- {q: "what earnings components were paid in Oct", intent: allowances_by_code, period: 2026-10}
+- {q: "Which department had the highest salary cost in September?", intent: dept_cost, period: 2026-09}
+- {q: "payroll spend by department last month", intent: dept_cost, period: 2026-09}
+- {q: "average net pay in each department", intent: dept_cost}
+- {q: "Who took home more than 9,000 in September?", intent: net_pay_above, period: 2026-09, amount: 9000}
+- {q: "employees earning above 12k last month", intent: net_pay_above, period: 2026-09, amount: 12000}
+- {q: "staff with net salary over 15000", intent: net_pay_above, amount: 15000}
+- {q: "Did anyone get zero pay in October?", intent: zero_net, period: 2026-10}
+- {q: "employees with a negative net salary last month", intent: zero_net, period: 2026-09}
+- {q: "Show the last 6 months of pay for E0045", intent: employee_pay_history, employee: E0045, n: 6}
+- {q: "how much has EMP0120 been paid recently", intent: employee_pay_history, employee: EMP0120}
+- {q: "payslip history of Siti Aminah", intent: employee_pay_history, employee: Siti Aminah}
+- {q: "How many active staff do we have right now?", intent: headcount_total}
+- {q: "total employee headcount", intent: headcount_total}
+- {q: "How many employees are in each department?", intent: headcount_by_department}
+- {q: "department with the largest number of staff", intent: headcount_by_department}
+- {q: "How many of our employees are foreigners?", intent: headcount_by_residency}
+- {q: "split between local and work pass staff", intent: headcount_by_residency}
+- {q: "How many S Pass holders are there?", intent: work_pass_by_type}
+- {q: "count of employment passes and work permits", intent: work_pass_by_type}
+- {q: "Which work passes expire in the next 60 days?", intent: work_pass_expiring, days: 60}
+- {q: "passes that need renewing within 2 weeks", intent: work_pass_expiring, days: 14}
+- {q: "who has a work permit expiring soon", intent: work_pass_expiring}
+- {q: "Who started with us in September?", intent: new_joiners, period: 2026-09}
+- {q: "new hires last month", intent: new_joiners, period: 2026-09}
+- {q: "Who resigned in August?", intent: leavers, period: 2026-08}
+- {q: "staff whose last day falls this month", intent: leavers, period: 2026-10}
+- {q: "Is anyone still being paid after they left?", intent: paid_after_leaving}
+- {q: "salary paid to employees who already resigned in September", intent: paid_after_leaving, period: 2026-09}
+- {q: "When did E0033 join the company?", intent: employee_profile, employee: E0033}
+- {q: "details of employee Lim Boon Huat", intent: employee_profile, employee: Lim Boon Huat}
+# out of scope: must be refused
+- {q: "How many days of medical leave has E0012 taken?", intent: _unsupported}
+- {q: "Please email the payslips to all staff", intent: _unsupported}
+- {q: "Give everyone a 3% raise", intent: _unsupported}
+- {q: "What's the capital of France?", intent: _unsupported}
+- {q: "remove E0050 from the system", intent: _unsupported}
+- {q: "who came in late on Monday", intent: _unsupported}

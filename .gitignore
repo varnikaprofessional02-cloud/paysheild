@@ -10,3 +10,4 @@ __pycache__/
 times-intelligence/payshield-ai/demo_output/
 times-intelligence/dotnet/**/bin/
 times-intelligence/dotnet/**/obj/
+times-intelligence/payshield-ai/app/nl2sql/intent_model.joblib

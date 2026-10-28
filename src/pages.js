@@ -1,7 +1,7 @@
 // PayShield product pages: Home (pay run readiness), the five guard pages and Proof.
 // Scenarios (step-by-step stories) are launched from these pages with "Demo this".
 import { ICON, statCard } from './chrome.js';
-import { GUARDS, POLICIES, RUN, AWS_PREVIEW, money, pendingIn, runSummary, payScore, GUARD_SWITCH, HIGH_RISK_GUARDS, isRemoval } from './company.js';
+import { GUARDS, POLICIES, RUN, AWS_PREVIEW, money, pendingIn, runSummary, payScore, GUARD_SWITCH, HIGH_RISK_GUARDS } from './company.js';
 import { RULES } from './rules.js';
 import { DEFAULT_CONFIG } from './scoring.js';
 
@@ -16,15 +16,15 @@ const demoBtn = (k, primary) => `<button class="btn ${primary ? 'p' : ''} sm" da
 
 function issueCard(i, showGuard, focus, sess) {
   const g = GUARDS[i.guard];
-  const open = i.state === 'open', rm = !open && isRemoval(i);
-  return `<div class="card ps-issue ${open ? 'is-' + i.status : rm ? 'is-removed' : 'is-done'} ${focus === i.id ? 'ps-focus' : ''}" id="iss-${i.id}">
+  const open = i.state === 'open';
+  return `<div class="card ps-issue ${open ? 'is-' + i.status : 'is-done'} ${focus === i.id ? 'ps-focus' : ''}" id="iss-${i.id}">
     <div class="ps-ih"><span class="pf-av">${i.ini}</span><div style="min-width:0"><b>${esc(i.name)}</b><div class="small muted">${esc(i.dept)}${showGuard ? ` · ${g.name}` : ''}</div></div>
-      <div class="ps-ir">${open ? `${st(i.status)}<span class="small muted">Trust ${i.score}</span>` : `<span class="tag ${rm ? 't-o' : 't-g'}">${rm ? (i.state === 'excluded' ? '⚠ Left out of run' : '⚠ Removed from run') : i.state === 'fixed' ? 'Fixed' : 'Accepted'}</span>`}</div></div>
+      <div class="ps-ir">${open ? `${st(i.status)}<span class="small muted">Trust ${i.score}</span>` : `<span class="tag ${i.state === 'excluded' ? 't-o' : 't-g'}">${i.state === 'fixed' ? 'Fixed' : i.state === 'excluded' ? 'Left out of run' : 'Accepted'}</span>`}</div></div>
     <div class="ps-it">${esc(i.title)}</div>
     ${sess && sess.decisions[i.id] && !open ? `<div class="ps-sess">${ICON.bot}<span>Decided with PayShield Agent: <b>${sess.decisions[i.id].key} · ${esc(sess.decisions[i.id].label)}</b> by ${esc(sess.decisions[i.id].by)} at ${sess.decisions[i.id].at}.</span></div>` : ''}
-    <div class="ps-ip"><span class="small muted">${esc(i.param[0])}</span> ${pv(i.param[1])} <span class="small muted">rule: ${esc(i.param[2])}</span><span class="ps-imp">${open ? 'At risk' : rm ? 'Not paid this run' : 'Kept right'} <b>${money(i.impact, i.impact % 1 ? 2 : 0)}</b></span></div>
+    <div class="ps-ip"><span class="small muted">${esc(i.param[0])}</span> ${pv(i.param[1])} <span class="small muted">rule: ${esc(i.param[2])}</span><span class="ps-imp">${open ? 'At risk' : 'Kept right'} <b>${money(i.impact, i.impact % 1 ? 2 : 0)}</b></span></div>
     ${open ? `<div class="ps-ia"><button class="btn p sm" data-act="fix:${i.id}">${esc(i.fix.label)}</button><button class="btn sm" data-act="alt:${i.id}">${esc(i.alt.label)}</button>${i.demo ? `<button class="linkbtn" data-act="go:${i.demo}">▶ See how it was caught</button>` : ''}</div>`
-      : `<div class="ps-done ${rm ? 'warn' : ''}">${rm ? '⚠' : '✓'} ${esc(i.state === 'fixed' ? i.fix.done : i.state === 'excluded' ? `Left out of the ${RUN.name} run; pay off-cycle once the evidence is in.` : i.alt.done)} <button class="linkbtn" data-act="undo:${i.id}">Undo</button></div>`}
+      : `<div class="ps-done">✓ ${esc(i.state === 'fixed' ? i.fix.done : i.state === 'excluded' ? `Left out of the ${RUN.name} run; pay off-cycle once the evidence is in.` : i.alt.done)} <button class="linkbtn" data-act="undo:${i.id}">Undo</button></div>`}
   </div>`;
 }
 

@@ -1,0 +1,685 @@
+# Question catalogue for text -> SQL without an LLM.
+# Each intent: a fixed, read-only SQL template + the slots it takes + example phrasings the classifier learns from.
+#   slots: period (a month; "latest" = the latest month with a pay run), n, amount, days, employee ("required" = must be in the question)
+#   SQL parameters: %(c)s company id (always from the session, never from the text), %(period)s first day of the month,
+#   %(n)s, %(amount)s, %(days)s, %(emp)s ('%text%'). @MACROS@ are expanded in catalog.py.
+# Add a question type: add an intent with its SQL and 15+ phrasings, then run scripts/nl2sql_train.py.
+
+intents:
+
+# ---------------------------------------------------------------- payroll
+- id: net_pay_total
+  title: Total net pay for a month
+  slots: {period: latest}
+  sql: |
+    SELECT pp.value AS period, count(*) AS employees, round(sum(@NET@), 2) AS total_net_pay
+    FROM @RUNS@ WHERE @IN_PERIOD@ GROUP BY pp.value
+  phrasings:
+    - what is the total net pay for september 2026
+    - total net pay this month
+    - how much net pay did we pay last month
+    - sum of net salary for oct
+    - total take home pay for the month
+    - how much are we paying out in net pay in august
+    - net payout total for 09/2026
+    - overall net pay for july 2026
+    - total amount paid to employees in september
+    - how much money goes to staff this month after deductions
+    - what is our net payroll for last month
+    - total nett pay in oct 2026
+    - how much is the net salary bill this month
+    - give me the total net pay
+    - net pay amount for the whole company in august
+
+- id: payroll_summary
+  title: Payroll cost summary for a month
+  slots: {period: latest}
+  sql: |
+    SELECT pp.value AS period, count(*) AS employees, round(sum(pr.basic_salary), 2) AS basic,
+           round(sum(pr.total_allowance), 2) AS allowances, round(sum(pr.total_deduction), 2) AS deductions,
+           round(sum(@CPF_EE@), 2) AS cpf_employee, round(sum(@CPF_ER@), 2) AS cpf_employer,
+           round(sum(@GROSS@), 2) AS gross, round(sum(@NET@), 2) AS net
+    FROM @RUNS@ WHERE @IN_PERIOD@ GROUP BY pp.value
+  phrasings:
+    - payroll summary for september 2026
+    - give me the payroll breakdown for this month
+    - show basic allowances deductions and cpf totals for last month
+    - payroll cost summary for oct
+    - what does the payroll look like this month
+    - summary of the pay run for august
+    - totals for basic salary allowance and deduction in july
+    - payroll overview for 09/2026
+    - break down this month's payroll cost
+    - show me the payroll totals
+    - what is the total payroll cost for last month
+    - gross and net totals for september
+    - total employment cost this month
+    - payroll figures for the month
+    - how much did payroll cost in august 2026
+
+- id: top_earners
+  title: Highest paid employees in a month
+  slots: {period: latest, n: 10}
+  sql: |
+    SELECT ucc.employee_no, trim(u.first_name || ' ' || u.last_name) AS name, pr.department,
+           pr.basic_salary AS basic, round(@GROSS@, 2) AS gross, round(@NET@, 2) AS net
+    FROM @RUNS@ @EMP_JOIN@ WHERE @IN_PERIOD@
+    ORDER BY @NET@ DESC LIMIT %(n)s
+  phrasings:
+    - who are the top 10 earners this month
+    - top 5 highest paid employees in september
+    - highest paid staff last month
+    - show the top earners
+    - who earned the most in august 2026
+    - list the 20 employees with the highest net pay
+    - biggest salaries this month
+    - top paid people in oct
+    - which employees have the highest pay
+    - rank employees by net pay
+    - who got paid the most last month
+    - top 3 earners for 09/2026
+    - show me highest earning employees
+    - most expensive employees this month
+    - top salaries in the company
+    - best paid employees in august
+    - who had the biggest pay packet
+    - our 3 best paid staff
+
+- id: cpf_totals
+  title: CPF contributions for a month
+  slots: {period: latest}
+  sql: |
+    SELECT pp.value AS period, count(*) FILTER (WHERE @CPF_EE@ > 0) AS employees_with_cpf,
+           round(sum(@CPF_EE@), 2) AS employee_cpf, round(sum(@CPF_ER@), 2) AS employer_cpf,
+           round(sum(@CPF_EE@ + @CPF_ER@), 2) AS total_cpf
+    FROM @RUNS@ WHERE @IN_PERIOD@ GROUP BY pp.value
+  phrasings:
+    - total cpf for september 2026
+    - how much cpf do we pay this month
+    - employer and employee cpf contributions last month
+    - cpf amount for oct
+    - what is the employer cpf total
+    - show cpf contributions for august
+    - how much cpf is due to the cpf board this month
+    - cpf breakdown for 09/2026
+    - total central provident fund contributions
+    - employee cpf deducted this month
+    - how much employer cpf did we contribute in july
+    - cpf payable for last month
+    - sum of cpf for the month
+    - cpf figures this month
+    - what do we owe cpf board for september
+
+- id: ot_over_hours
+  title: Employees with overtime above a number of hours
+  slots: {period: latest, amount: 72}
+  sql: |
+    SELECT ucc.employee_no, trim(u.first_name || ' ' || u.last_name) AS name, sum(@ITEM_HOURS@) AS ot_hours,
+           round(sum(@ITEM_AMT@), 2) AS ot_pay
+    FROM @RUNS@ @EMP_JOIN@ @ITEMS@
+    WHERE @IN_PERIOD@ AND @ITEM_IS_OT@
+    GROUP BY ucc.employee_no, u.first_name, u.last_name
+    HAVING sum(@ITEM_HOURS@) > %(amount)s ORDER BY ot_hours DESC
+  phrasings:
+    - who worked more than 72 hours overtime this month
+    - employees with ot over 72 hours in september
+    - overtime above 60 hours last month
+    - which staff exceeded the overtime limit
+    - list people with more than 50 ot hours
+    - anyone over 72 hours of overtime in oct
+    - employees breaching the overtime hour limit
+    - who has excessive overtime hours
+    - ot hours greater than 40 in august 2026
+    - staff with too much overtime this month
+    - show employees doing over 72 hours ot
+    - overtime hours exceeding 72
+    - who did more than 30 hours of overtime last month
+    - employees with high overtime hours
+    - overtime limit breaches for 09/2026
+
+- id: ot_total
+  title: Overtime pay and hours for a month
+  slots: {period: latest}
+  sql: |
+    SELECT ucc.employee_no, trim(u.first_name || ' ' || u.last_name) AS name, sum(@ITEM_HOURS@) AS ot_hours,
+           round(sum(@ITEM_AMT@), 2) AS ot_pay
+    FROM @RUNS@ @EMP_JOIN@ @ITEMS@
+    WHERE @IN_PERIOD@ AND @ITEM_IS_OT@
+    GROUP BY ucc.employee_no, u.first_name, u.last_name ORDER BY ot_pay DESC
+  phrasings:
+    - how much overtime did we pay this month
+    - total overtime pay for september
+    - overtime cost last month
+    - show overtime pay by employee
+    - ot pay for oct 2026
+    - who got overtime in august
+    - overtime payments this month
+    - list overtime hours and pay
+    - what is the ot cost for 09/2026
+    - overtime paid to each employee
+    - total ot amount last month
+    - how many overtime hours were paid this month
+    - overtime breakdown
+    - employees who were paid overtime
+    - overtime spend for july
+
+- id: pay_run_status
+  title: Pay runs and their status for a month
+  slots: {period: latest}
+  sql: |
+    SELECT r.name AS pay_run, r.code, pp.value AS period, r.pay_run_date::date AS pay_date, r.is_lock AS locked,
+           st.name AS record_status, count(pr.id) AS records
+    FROM payroll.pay_run r JOIN payroll.pay_period pp ON pp.id = r.pay_period_id AND pp.company_id = %(c)s
+    LEFT JOIN payroll.pay_record pr ON pr.pay_run_id = r.id
+    LEFT JOIN payroll.lk_pay_run_status st ON st.id = pr.status_id
+    WHERE @IN_PERIOD@
+    GROUP BY r.id, r.name, r.code, pp.value, r.pay_run_date, r.is_lock, st.name ORDER BY r.id
+  phrasings:
+    - what is the status of the pay run this month
+    - is the september payroll locked
+    - pay run status for last month
+    - show pay runs for oct 2026
+    - has the august pay run been finalised
+    - which pay runs exist for this month
+    - status of payroll processing
+    - list the pay runs for 09/2026
+    - when is the pay date this month
+    - is payroll done for september
+    - pay run progress
+    - what pay runs do we have this month
+    - show the payroll run and its status
+    - is the pay run closed
+    - pay run details for july
+
+- id: net_pay_trend
+  title: Net pay per month (trend)
+  slots: {n: 12}
+  sql: |
+    SELECT pp.value AS period, count(*) AS employees, round(sum(@NET@), 2) AS total_net_pay
+    FROM @RUNS@
+    WHERE to_date(pp.value, 'MM/YYYY') > (SELECT max(to_date(p2.value, 'MM/YYYY')) FROM payroll.pay_period p2
+                                          JOIN payroll.pay_run r2 ON r2.pay_period_id = p2.id WHERE p2.company_id = %(c)s)
+                                         - make_interval(months => %(n)s)
+    GROUP BY pp.value ORDER BY to_date(pp.value, 'MM/YYYY')
+  phrasings:
+    - show net pay for the last 12 months
+    - payroll trend over the past 6 months
+    - monthly net pay history
+    - how has total pay changed over the year
+    - net pay by month
+    - trend of payroll cost
+    - show me the last 3 months of payroll totals
+    - month by month payroll
+    - payroll for each month this year
+    - monthly payroll totals
+    - how did net pay move over time
+    - graph of payroll by month
+    - total pay per month for the past year
+    - payroll history by month
+    - last 24 months net payroll
+
+- id: month_change
+  title: This month vs previous month
+  slots: {period: latest}
+  sql: |
+    WITH m AS (SELECT to_date(pp.value, 'MM/YYYY') AS period, count(*) AS employees, sum(@NET@) AS net
+               FROM @RUNS@
+               WHERE to_date(pp.value, 'MM/YYYY') IN (%(period)s::date, (%(period)s::date - interval '1 month')::date)
+               GROUP BY 1)
+    SELECT to_char(cur.period, 'MM/YYYY') AS period, cur.employees, round(cur.net, 2) AS net,
+           to_char(prev.period, 'MM/YYYY') AS previous_period, prev.employees AS previous_employees,
+           round(prev.net, 2) AS previous_net, round(cur.net - prev.net, 2) AS change,
+           round(100 * (cur.net - prev.net) / NULLIF(prev.net, 0), 1) AS change_pct
+    FROM m cur LEFT JOIN m prev ON prev.period = (cur.period - interval '1 month')::date
+    WHERE cur.period = %(period)s::date
+  phrasings:
+    - how does this month compare to last month
+    - change in net pay from august to september
+    - payroll increase compared with the previous month
+    - month on month change in payroll
+    - why is payroll higher than last month
+    - difference between this month and last month pay
+    - variance against previous month
+    - is september payroll up or down
+    - compare oct payroll with sep
+    - how much did payroll go up this month
+    - payroll movement versus prior month
+    - percentage change in net pay this month
+    - did total pay drop compared to last month
+    - net pay change vs previous period
+    - mom variance of payroll
+
+- id: deductions_by_code
+  title: Deductions by pay code for a month
+  slots: {period: latest}
+  sql: |
+    SELECT @ITEM_CODE@ AS pay_code, max(@ITEM_NAME@) AS description, count(*) AS employees, round(sum(@ITEM_AMT@), 2) AS amount
+    FROM @RUNS@ @ITEMS@ WHERE @IN_PERIOD@ AND NOT @ITEM_EARN@
+    GROUP BY 1 ORDER BY amount DESC
+  phrasings:
+    - deductions by code this month
+    - what deductions were made in september
+    - breakdown of deductions last month
+    - list all deduction items for oct
+    - total deductions per pay code
+    - which deductions are we taking from salaries
+    - deduction summary for august 2026
+    - show salary deductions by type
+    - how much was deducted for each code
+    - deduction codes and amounts
+    - what are the biggest deductions this month
+    - deductions for 09/2026
+    - itemised deductions
+    - deduction totals by component
+    - show all payroll deductions
+
+- id: allowances_by_code
+  title: Allowances and earnings by pay code for a month
+  slots: {period: latest}
+  sql: |
+    SELECT @ITEM_CODE@ AS pay_code, max(@ITEM_NAME@) AS description, count(*) AS employees, round(sum(@ITEM_AMT@), 2) AS amount
+    FROM @RUNS@ @ITEMS@ WHERE @IN_PERIOD@ AND @ITEM_EARN@
+    GROUP BY 1 ORDER BY amount DESC
+  phrasings:
+    - allowances by code this month
+    - what allowances did we pay in september
+    - breakdown of earnings by pay code
+    - list allowance items for last month
+    - total allowances per pay code
+    - how much transport allowance was paid
+    - bonus and allowance totals for oct
+    - earnings components this month
+    - show allowance summary for august 2026
+    - which allowances cost the most
+    - allowance codes and amounts
+    - earnings by type for 09/2026
+    - additional payments by code
+    - itemised allowances
+    - show all pay components that are earnings
+
+- id: dept_cost
+  title: Payroll cost by department for a month
+  slots: {period: latest}
+  sql: |
+    SELECT coalesce(nullif(pr.department, ''), '(none)') AS department, count(*) AS employees,
+           round(sum(@GROSS@), 2) AS gross, round(sum(@NET@), 2) AS net, round(avg(@NET@), 2) AS average_net
+    FROM @RUNS@ WHERE @IN_PERIOD@ GROUP BY 1 ORDER BY gross DESC
+  phrasings:
+    - payroll cost by department this month
+    - which department costs the most
+    - salary spend per department in september
+    - department wise payroll for last month
+    - break down pay by department
+    - how much does each department cost
+    - net pay by department for oct
+    - department payroll totals
+    - average pay per department
+    - which team has the highest payroll
+    - cost per department for august 2026
+    - show departments and their salary cost
+    - departmental payroll breakdown
+    - payroll split by department
+    - department cost 09/2026
+
+- id: net_pay_above
+  title: Employees with net pay above an amount
+  slots: {period: latest, amount: 10000}
+  sql: |
+    SELECT ucc.employee_no, trim(u.first_name || ' ' || u.last_name) AS name, pr.department, round(@NET@, 2) AS net
+    FROM @RUNS@ @EMP_JOIN@ WHERE @IN_PERIOD@ AND @NET@ > %(amount)s ORDER BY net DESC
+  phrasings:
+    - employees with net pay above 10000 this month
+    - who is paid more than 8000
+    - staff earning over 5k last month
+    - net salary greater than 12000 in september
+    - list people with pay above 15000
+    - employees whose net pay exceeds 9000
+    - anyone earning more than 20000 a month
+    - who takes home over 7000
+    - salaries above 6000 in oct
+    - staff paid above 10k
+    - employees with net more than 11000
+    - net pay over 5000 for 09/2026
+    - which employees get more than 4000
+    - people with salary exceeding 13000
+    - pay above 25000 this month
+
+- id: zero_net
+  title: Employees with zero or negative net pay
+  slots: {period: latest}
+  sql: |
+    SELECT ucc.employee_no, trim(u.first_name || ' ' || u.last_name) AS name, pr.basic_salary AS basic,
+           pr.total_deduction AS deductions, round(@NET@, 2) AS net
+    FROM @RUNS@ @EMP_JOIN@ WHERE @IN_PERIOD@ AND @NET@ <= 0 ORDER BY net
+  phrasings:
+    - who has zero net pay this month
+    - employees with negative net pay
+    - anyone getting nothing this month
+    - staff with no take home pay
+    - net pay zero or below in september
+    - which employees have negative salary
+    - list people with zero pay last month
+    - employees paid nothing
+    - negative net pay for oct
+    - who is in deficit this payroll
+    - zero salary employees
+    - show employees whose deductions wipe out their pay
+    - nil net pay
+    - people with net pay of 0
+    - check for negative pay this month
+
+- id: employee_pay_history
+  title: Pay history of one employee
+  slots: {employee: required, n: 6}
+  sql: |
+    SELECT ucc.employee_no, trim(u.first_name || ' ' || u.last_name) AS name, pp.value AS period, r.name AS pay_run,
+           pr.basic_salary AS basic, pr.total_allowance AS allowances, pr.total_deduction AS deductions,
+           round(@CPF_EE@, 2) AS cpf_employee, round(@GROSS@, 2) AS gross, round(@NET@, 2) AS net
+    FROM @RUNS@ @EMP_JOIN@
+    WHERE (ucc.employee_no ILIKE %(emp)s OR (u.first_name || ' ' || u.last_name) ILIKE %(emp)s)
+    ORDER BY to_date(pp.value, 'MM/YYYY') DESC, r.id DESC LIMIT %(n)s
+  phrasings:
+    - show pay history for E0012
+    - what did EMP0042 get paid over the last 6 months
+    - salary history of John Tan
+    - last 3 payslips for E0105
+    - how much was Mei Ling paid each month
+    - pay records for employee E0007
+    - net pay history of Ahmad Rahman
+    - past salaries for E0230
+    - show me E0050 payroll for the past year
+    - monthly pay of employee Priya Nair
+    - payslip history for E0099
+    - what has E0011 been paid
+    - previous pay for Tan Wei
+    - earnings history of E0301
+    - last 12 months pay for E0002
+
+# ---------------------------------------------------------------- employees
+- id: headcount_total
+  title: Number of active employees
+  slots: {}
+  sql: |
+    SELECT count(DISTINCT ucc.user_id) AS active_employees, count(*) AS active_contracts
+    FROM employee.user_company_contract ucc
+    WHERE ucc.company_id = %(c)s AND ucc.is_active
+      AND (ucc.contract_end_date IS NULL OR ucc.contract_end_date >= current_date)
+  phrasings:
+    - how many employees do we have
+    - what is our headcount
+    - total number of staff
+    - number of active employees
+    - how many people work here
+    - current headcount
+    - count of employees in the company
+    - how many staff are active
+    - total workforce size
+    - employee count
+    - how many workers do we employ
+    - headcount today
+    - number of people on payroll
+    - how big is the company
+    - total active staff
+
+- id: headcount_by_department
+  title: Active employees by department
+  slots: {}
+  sql: |
+    SELECT coalesce(d.description, d.code, '(none)') AS department, count(DISTINCT ucc.user_id) AS employees
+    FROM employee.user_company_contract ucc
+    LEFT JOIN LATERAL (SELECT cp.department_id FROM employee.career_progression cp WHERE cp.contract_id = ucc.id
+                       AND cp.effective_date <= current_date ORDER BY cp.effective_date DESC, cp.id DESC LIMIT 1) cp ON true
+    LEFT JOIN company.code_setup d ON d.id = cp.department_id
+    WHERE ucc.company_id = %(c)s AND ucc.is_active
+      AND (ucc.contract_end_date IS NULL OR ucc.contract_end_date >= current_date)
+    GROUP BY 1 ORDER BY employees DESC
+  phrasings:
+    - headcount by department
+    - how many employees in each department
+    - staff count per department
+    - which department has the most people
+    - department sizes
+    - number of employees by department
+    - show headcount split by department
+    - how many people per team
+    - employees in every department
+    - department wise headcount
+    - biggest department by staff
+    - breakdown of staff across departments
+    - how many work in each department
+    - department employee numbers
+    - headcount per dept
+
+- id: headcount_by_residency
+  title: Active employees by residency (local vs work pass)
+  slots: {}
+  sql: |
+    SELECT coalesce(ur.residency_type::text, '(not set)') AS residency, count(DISTINCT ucc.user_id) AS employees
+    FROM employee.user_company_contract ucc LEFT JOIN employee.user_regulatory ur ON ur.user_id = ucc.user_id
+    WHERE ucc.company_id = %(c)s AND ucc.is_active
+      AND (ucc.contract_end_date IS NULL OR ucc.contract_end_date >= current_date)
+    GROUP BY 1 ORDER BY employees DESC
+  phrasings:
+    - how many foreigners do we employ
+    - locals vs foreign workers
+    - number of singaporeans and prs
+    - how many work pass holders are there
+    - headcount by residency
+    - split of local and foreign staff
+    - foreign worker count
+    - how many employees are citizens or pr
+    - residency breakdown of staff
+    - ratio of locals to foreigners
+    - count of foreign employees
+    - how many staff need a work pass
+    - local headcount
+    - nationality mix of employees
+    - employees by residency status
+
+- id: work_pass_by_type
+  title: Work pass holders by pass type
+  slots: {}
+  sql: |
+    SELECT coalesce(cs.code, '(unknown)') AS pass_type, count(*) AS holders,
+           count(*) FILTER (WHERE w.levy_management_id IS NULL) AS without_levy
+    FROM employee.epm_work_pass_records w
+    JOIN employee.user_regulatory ur ON ur.id = w.regulatory_id
+    JOIN employee.user_company_contract ucc ON ucc.user_id = ur.user_id AND ucc.company_id = %(c)s AND ucc.is_active
+    LEFT JOIN company.code_setup cs ON cs.id = w.work_pass_id
+    WHERE w.cancellation_date IS NULL AND w.pass_expiry_date >= current_date
+    GROUP BY 1 ORDER BY holders DESC
+  phrasings:
+    - how many employment pass holders do we have
+    - count of s pass and work permit holders
+    - work passes by type
+    - how many ep sp and wp
+    - breakdown of work pass types
+    - number of work permits
+    - how many s passes are active
+    - which work passes do our staff hold
+    - work pass holders without levy
+    - pass type summary
+    - employment pass count
+    - how many staff on work permit
+    - active work passes by category
+    - list pass types and holders
+    - work permit and s pass numbers
+    - how many s pass holders are there
+    - number of employment pass holders
+    - how many work permit holders do we employ
+
+- id: work_pass_expiring
+  title: Work passes expiring soon
+  slots: {days: 30}
+  sql: |
+    SELECT ucc.employee_no, trim(u.first_name || ' ' || u.last_name) AS name, cs.code AS pass_type,
+           w.pass_expiry_date AS expires_on, w.pass_expiry_date - current_date AS days_left
+    FROM employee.epm_work_pass_records w
+    JOIN employee.user_regulatory ur ON ur.id = w.regulatory_id
+    JOIN employee.user_company_contract ucc ON ucc.user_id = ur.user_id AND ucc.company_id = %(c)s AND ucc.is_active
+    JOIN security."user" u ON u.id = ucc.user_id
+    LEFT JOIN company.code_setup cs ON cs.id = w.work_pass_id
+    WHERE w.cancellation_date IS NULL
+      AND w.pass_expiry_date BETWEEN current_date AND current_date + %(days)s::int
+    ORDER BY w.pass_expiry_date
+  phrasings:
+    - which work passes expire in the next 30 days
+    - passes expiring within 60 days
+    - who needs a work pass renewal soon
+    - work permits expiring this month
+    - employment passes due to expire
+    - list expiring passes
+    - upcoming work pass expiries
+    - any s pass expiring in 2 weeks
+    - work passes to renew in 90 days
+    - whose pass is about to expire
+    - expiring ep in the next 3 months
+    - pass renewals due
+    - work pass expiry report
+    - foreign staff with passes expiring soon
+    - passes ending within 45 days
+
+- id: new_joiners
+  title: New joiners in a month
+  slots: {period: latest}
+  sql: |
+    SELECT ucc.employee_no, trim(u.first_name || ' ' || u.last_name) AS name, ucc.contract_start_date::date AS start_date
+    FROM employee.user_company_contract ucc JOIN security."user" u ON u.id = ucc.user_id
+    WHERE ucc.company_id = %(c)s
+      AND ucc.contract_start_date >= %(period)s::date AND ucc.contract_start_date < %(period)s::date + interval '1 month'
+    ORDER BY ucc.contract_start_date
+  phrasings:
+    - who joined this month
+    - new hires in september 2026
+    - list new joiners last month
+    - how many people started in oct
+    - new employees in august
+    - who are the new starters
+    - recent hires
+    - staff who joined in 09/2026
+    - onboarded employees this month
+    - new staff in july
+    - who was hired last month
+    - joiners for the month
+    - how many new hires did we have
+    - employees starting this month
+    - new recruits in september
+
+- id: leavers
+  title: Employees leaving in a month
+  slots: {period: latest}
+  sql: |
+    SELECT ucc.employee_no, trim(u.first_name || ' ' || u.last_name) AS name, x.resignation_date::date AS resigned_on,
+           x.last_day_of_work::date AS last_day, rs.description AS reason
+    FROM employee.contract_resignation x
+    JOIN employee.user_company_contract ucc ON ucc.id = x.contract_id AND ucc.company_id = %(c)s
+    JOIN security."user" u ON u.id = ucc.user_id
+    LEFT JOIN company.code_setup rs ON rs.id = x.reason_id
+    WHERE x.last_day_of_work >= %(period)s::date AND x.last_day_of_work < %(period)s::date + interval '1 month'
+    ORDER BY x.last_day_of_work
+  phrasings:
+    - who is leaving this month
+    - resignations in september 2026
+    - list leavers last month
+    - how many people left in oct
+    - employees who resigned in august
+    - who has their last day this month
+    - staff exits for 09/2026
+    - attrition this month
+    - who quit last month
+    - leavers for the month
+    - resigned employees in july
+    - whose last working day is in september
+    - departures this month
+    - how many resignations did we get
+    - employees leaving the company
+
+- id: paid_after_leaving
+  title: Employees paid after their last day of work
+  slots: {period: latest}
+  sql: |
+    SELECT ucc.employee_no, trim(u.first_name || ' ' || u.last_name) AS name, x.last_day::date AS last_day,
+           round(@NET@, 2) AS net_paid
+    FROM @RUNS@ @EMP_JOIN@
+    JOIN LATERAL (SELECT min(cr.last_day_of_work) AS last_day FROM employee.contract_resignation cr
+                  WHERE cr.contract_id = ucc.id) x ON x.last_day IS NOT NULL
+    WHERE @IN_PERIOD@ AND x.last_day < %(period)s::date AND @NET@ > 0
+    ORDER BY x.last_day
+  phrasings:
+    - who was paid after leaving
+    - employees paid after their last day this month
+    - resigned staff still on payroll
+    - are we paying anyone who already left
+    - leavers still being paid in september
+    - salary paid to ex employees
+    - ghost employees on the pay run
+    - people paid after resignation
+    - former staff in this month's payroll
+    - check for payments to leavers
+    - anyone paid after their last working day in oct
+    - terminated employees still paid
+    - exited staff receiving salary
+    - paid after last day of work
+    - overpayment to resigned employees
+
+- id: employee_profile
+  title: Profile of one employee
+  slots: {employee: required}
+  sql: |
+    SELECT ucc.employee_no, trim(u.first_name || ' ' || u.last_name) AS name, ucc.contract_id AS contract,
+           ucc.contract_start_date::date AS start_date, ucc.contract_end_date::date AS end_date, ucc.is_active AS active,
+           ur.residency_type::text AS residency, x.last_day::date AS last_day
+    FROM employee.user_company_contract ucc JOIN security."user" u ON u.id = ucc.user_id
+    LEFT JOIN employee.user_regulatory ur ON ur.user_id = ucc.user_id
+    LEFT JOIN LATERAL (SELECT min(cr.last_day_of_work) AS last_day FROM employee.contract_resignation cr
+                       WHERE cr.contract_id = ucc.id) x ON true
+    WHERE ucc.company_id = %(c)s AND (ucc.employee_no ILIKE %(emp)s OR (u.first_name || ' ' || u.last_name) ILIKE %(emp)s)
+    ORDER BY ucc.contract_start_date DESC
+  phrasings:
+    - tell me about E0012
+    - who is EMP0042
+    - employee details for John Tan
+    - when did E0105 join
+    - is Mei Ling still active
+    - profile of employee E0007
+    - what is Ahmad Rahman's residency
+    - show E0230 details
+    - contract details for E0050
+    - start date of Priya Nair
+    - look up employee E0099
+    - is E0011 a foreigner
+    - info on Tan Wei
+    - when does E0301 contract end
+    - find employee E0002
+
+# ---------------------------------------------------------------- out of scope (taught so the classifier can refuse)
+- id: _unsupported
+  title: Not supported
+  slots: {}
+  sql: ""
+  phrasings:
+    - what is the weather today
+    - how many days of annual leave does John have
+    - book a meeting room
+    - send the payslips by email
+    - delete employee E0012
+    - increase everyone's salary by 5 percent
+    - what is the meaning of life
+    - write me a poem
+    - what is the leave balance for E0011
+    - approve the pay run
+    - who is the ceo
+    - change my password
+    - how do i apply for medical leave
+    - update the bank account of E0050
+    - tell me a joke
+    - which employees were late to work yesterday
+    - what are the public holidays
+    - create a new pay code
+    - translate this to chinese
+    - what time is it
+    - remove employee E0020
+    - deactivate E0031 in the system
+    - terminate the contract of E0044
+    - add a new employee
+    - reset the password for E0010
