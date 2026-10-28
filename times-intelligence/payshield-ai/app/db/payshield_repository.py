@@ -69,7 +69,8 @@ class PostgresPayShieldRepository:
     # every AI row for the company, in one transaction; settings (overtime codes) and the subscription row stay
     _PURGE = (("feedback", "company_id"), ("assistant_audit", "company_id"), ("analysis", "company_id"),
               ("run_watermark", "company_id"), ("training_job", "company_id"), ("model_registry", "company_id"),
-              ("area_model", "company_id"))
+              ("area_model", "company_id"), ("identity_decision", "company_id"), ("learned_pattern", "company_id"),
+              ("agent_skill", "company_id"), ("agent_gap", "company_id"))
 
     def purge_company_data(self, company_id: int) -> dict[str, int]:
         counts = {}

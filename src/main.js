@@ -352,15 +352,14 @@ const PAGE_LABEL = { home:'Trust Check', people:GUARDS.people.name, time:GUARDS.
 S.mode = 'page'; S.page = 'home'; S.issues = ISSUES(); S.approved = false; initAgentState(S);
 PAGES.agent = { crumb: 'PayShield › <b>PayShield Agent</b>', body: () => TI.agentPage(() => agentBody(S)) };
 PAGES.records = { crumb: 'PayShield › <b>Pay run records</b>', body: () => recordsBody(S) };
-const TI = intelligence({ S, render: () => render() }); Object.assign(PAGES, TI.pages); Object.assign(PAGE_LABEL, TI.labels); S.policy = Object.fromEntries(POLICIES.map((p) => [p.id, p.on]));
+const TI = intelligence({ S, render: () => render(), openPage: (k) => openPage(k) }); Object.assign(PAGES, TI.pages); Object.assign(PAGE_LABEL, TI.labels); S.policy = Object.fromEntries(POLICIES.map((p) => [p.id, p.on]));
 const gCount = (k) => pendingIn(S.issues, k).length, gHeld = (k) => pendingIn(S.issues, k).some((i) => i.status === 'held');
 const MENU_ITEMS = () => [
-  { label: 'PayShield', items: [
-    { k:'home', label:'Trust Check', icon:'gauge', act:'page:home', count: pendingIn(S.issues).length, held: pendingIn(S.issues).some((i) => i.status === 'held') },
-    { k:'agent', label:'PayShield Agent', icon:'bot', act:'page:agent', tag:'<span class="new">AI</span>' } ] },
-  { label: 'Guards', items: Object.entries(GUARDS).map(([k, g]) => ({ k, label: ({ people:'Employment', time:'Attendance' })[k] || g.name, icon: g.icon, act: 'page:' + k, ...(GUARD_SWITCH.off[k] ? { tag: '<span class="tag t-n ps-offtag">Off</span>' } : { count: gCount(k), held: gHeld(k) }) })) },
-  { label: 'Audit', items: [ { k:'records', label:'Pay run records', icon:'receipt', act:'page:records' }, { k:'proof', label:'Proof & test run', icon:'flask', act:'page:proof' }, { k:'validators', label:'Rules & parameters', icon:'settings', act:'go:validators' } ] },
   ...TI.menu(),
+  { label: 'PayShield', items: [
+    { k:'tiPayShield', label:'PayShield', icon:'gauge', act:'page:tiPayShield' },
+    { k:'tiPayRun', label:'Pay runs', icon:'receipt', act:'page:tiPayRun' },
+    { k:'agent', label:'PayShield Agent', icon:'bot', act:'page:agent', tag:'<span class="new">AI</span>' } ] },
 ];
 setPsMenu(() => ({ company: CO, pending: pendingIn(S.issues).length, active: S.mode === 'page' ? S.page : SC_MODULE[S.sc], groups: MENU_ITEMS() }));
 function logGuard(k, action, o){

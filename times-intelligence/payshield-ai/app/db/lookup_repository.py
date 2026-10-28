@@ -34,23 +34,30 @@ class PostgresLookupRepository:
             return c.execute(sql, p).fetchall()
 
     # employees ---------------------------------------------------------------------------------
-    def list_employees(self, company_id: int, search: str | None, limit: int, offset: int) -> dict:
+    _METRICS = {"basic": "basic", "net": "net", "gross": "gross"}  # whitelisted; never taken from user text
+
+    def list_employees(self, company_id: int, search: str | None, limit: int, offset: int, *, metric: str = "basic",
+                       min_amount: float | None = None, max_amount: float | None = None, sort: str = "employee") -> dict:
+        """Employees with their latest pay; optional amount filter on basic / net / gross of that latest pay record."""
+        col = self._METRICS.get(metric, "basic")
         term = (search or "").strip()
-        p = {"c": company_id, "all": not term, "q": f"%{term}%", "l": limit, "o": offset}
-        where = """ucc.company_id = %(c)s AND (%(all)s OR ucc.employee_no ILIKE %(q)s
-                   OR (u.first_name || ' ' || u.last_name) ILIKE %(q)s)"""
-        total = self._all(f"""SELECT count(*) AS n FROM employee.user_company_contract ucc
-            JOIN security."user" u ON u.id = ucc.user_id WHERE {where}""", p)[0]["n"]
-        rows = self._all(f"""SELECT ucc.employee_no, trim(u.first_name || ' ' || u.last_name) AS name, ucc.contract_start_date AS hired,
-                lp.period AS last_period, lp.basic, lp.net
+        p = {"c": company_id, "all": not term, "q": f"%{term}%", "l": limit, "o": offset, "lo": min_amount, "hi": max_amount}
+        order = {"employee": "employee_no", "asc": f"{col} ASC NULLS LAST, employee_no", "desc": f"{col} DESC NULLS LAST, employee_no"}[
+            sort if sort in ("employee", "asc", "desc") else "employee"]
+        base = f"""WITH e AS (SELECT ucc.employee_no, trim(u.first_name || ' ' || u.last_name) AS name, ucc.contract_start_date AS hired,
+                lp.period AS last_period, lp.basic, lp.net, lp.gross
             FROM employee.user_company_contract ucc JOIN security."user" u ON u.id = ucc.user_id
-            LEFT JOIN LATERAL (SELECT pp.value AS period, pr.basic_salary AS basic, {_NET} AS net
+            LEFT JOIN LATERAL (SELECT pp.value AS period, pr.basic_salary AS basic, {_NET} AS net, {_GROSS} AS gross
                 FROM payroll.pay_record pr JOIN payroll.pay_run r ON r.id = pr.pay_run_id
                 JOIN payroll.pay_period pp ON pp.id = r.pay_period_id
                 WHERE pr.contract_id = ucc.id AND pp.company_id = %(c)s
                 ORDER BY to_date(pp.value, 'MM/YYYY') DESC, r.id DESC LIMIT 1) lp ON true
-            WHERE {where} ORDER BY ucc.employee_no LIMIT %(l)s OFFSET %(o)s""", p)
-        return {"total": total, "employees": rows}
+            WHERE ucc.company_id = %(c)s AND (%(all)s OR ucc.employee_no ILIKE %(q)s
+                  OR (u.first_name || ' ' || u.last_name) ILIKE %(q)s))
+            SELECT * FROM e WHERE (%(lo)s::numeric IS NULL OR {col} >= %(lo)s) AND (%(hi)s::numeric IS NULL OR {col} < %(hi)s)"""
+        total = self._all(f"SELECT count(*) AS n FROM ({base}) x", p)[0]["n"]
+        rows = self._all(f"{base} ORDER BY {order} LIMIT %(l)s OFFSET %(o)s", p)
+        return {"total": total, "employees": rows, "filter": {"metric": col, "min": min_amount, "max": max_amount}}
 
     def employee_pay_history(self, company_id: int, employee_no: str, months: int) -> dict | None:
         emp = self._all("""SELECT ucc.id, ucc.employee_no, trim(u.first_name || ' ' || u.last_name) AS name, ucc.contract_start_date AS hired
@@ -74,6 +81,38 @@ class PostgresLookupRepository:
     def _run(self, company_id: int, pay_run_uid: str) -> dict | None:
         rows = self._all(_RUNS + " AND r.uid = %(u)s::uuid", {"c": company_id, "u": pay_run_uid})
         return rows[0] if rows else None
+
+    def run_employees(self, company_id: int, pay_run_uid: str) -> dict | None:
+        """Every employee paid in one pay run, with the amounts each PayShield guard looks at.
+
+        Overtime hours = overtime pay items (company setting overtime_pay_codes) divided by their hourly rate."""
+        run = self._run(company_id, pay_run_uid)
+        if not run:
+            return None
+        rows = self._all(f"""SELECT ucc.employee_no, trim(u.first_name || ' ' || u.last_name) AS name, pr.department, pr.designation,
+                ucc.contract_start_date AS hired, pr.is_new_hire AS new_hire, pr.is_resignee AS leaver,
+                pr.basic_salary AS basic, pr.total_allowance AS allowances, pr.total_deduction AS deductions, pr.total_cpf AS cpf,
+                {_GROSS} AS gross, {_NET} AS net,
+                (SELECT round(sum((pc -> 'amount' ->> 'amount')::numeric / nullif((pc -> 'amountType' ->> 'amountTypeRateValue')::numeric, 0)), 1)
+                   FROM jsonb_path_query(pr.data_processed::jsonb, 'strict $.**.payComponent') pc
+                  WHERE pc -> 'payCode' ->> 'code' = ANY(coalesce(s.overtime_pay_codes, ARRAY[]::text[]))) AS ot_hours
+            FROM payroll.pay_record pr
+            JOIN employee.user_company_contract ucc ON ucc.id = pr.contract_id AND ucc.company_id = %(c)s
+            JOIN security."user" u ON u.id = ucc.user_id
+            LEFT JOIN times_intelligence.company_setting s ON s.company_id = %(c)s
+            WHERE pr.pay_run_id = %(r)s ORDER BY ucc.employee_no""", {"c": company_id, "r": run["id"]})
+        return {"pay_run_id": run["pay_run_id"], "name": run["name"], "period": run["period"], "employees": rows}
+
+    def pay_history_rows(self, company_id: int) -> list[dict]:
+        """Every employee's monthly pay amounts for the whole company history (input of the pay forecast)."""
+        return self._all(f"""SELECT ucc.user_id, ucc.employee_no, trim(u.first_name || ' ' || u.last_name) AS name,
+                to_date(pp.value, 'MM/YYYY') AS period, pr.basic_salary AS basic, pr.total_allowance AS allowances,
+                pr.total_cpf AS cpf, {_GROSS} AS gross, {_NET} AS net
+            FROM payroll.pay_record pr
+            JOIN payroll.pay_run r ON r.id = pr.pay_run_id
+            JOIN payroll.pay_period pp ON pp.id = r.pay_period_id AND pp.company_id = %(c)s
+            JOIN employee.user_company_contract ucc ON ucc.id = pr.contract_id AND ucc.company_id = %(c)s
+            JOIN security."user" u ON u.id = ucc.user_id""", {"c": company_id})
 
     def run_totals(self, company_id: int, limit: int) -> list[dict]:
         out = []
