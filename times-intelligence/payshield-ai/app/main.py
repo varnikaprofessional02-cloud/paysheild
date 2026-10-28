@@ -28,6 +28,7 @@ from app.ml.model_registry import BundleCache, ModelRegistry
 from app.security.permissions import build_service_context, build_user_context, require
 from app.services.analysis_service import PayShieldService
 from app.services.area_service import AREAS, AreaService
+from app.services.pay_run_service import PayRunService
 from app.services.assistant_service import AssistantService
 
 log = logging.getLogger(__name__)
@@ -43,6 +44,31 @@ class Api(BaseModel):
 class AnalyzeRequest(Api):
     pay_run_id: str
     supersede: bool = False
+
+
+class IdentityDecisionRequest(Api):
+    pay_run_id: str
+    employee_no: str
+    anomaly_type: str
+    outcome: Literal["CONFIRMED_ERROR", "EXPECTED_CHANGE", "FALSE_POSITIVE", "NEEDS_INVESTIGATION"]
+
+
+class SkillRequest(Api):
+    phrases: list[str] = Field(min_length=1, max_length=20)
+    kind: Literal["ANSWER", "ROUTE"]
+    answer: str | None = Field(default=None, max_length=4000)
+    route: str | None = Field(default=None, max_length=300)
+
+
+class SkillUpdate(Api):
+    add_phrase: str | None = Field(default=None, max_length=300)
+    answer: str | None = Field(default=None, max_length=4000)
+    route: str | None = Field(default=None, max_length=300)
+    helpful: bool | None = None
+
+
+class QuestionRequest(Api):
+    question: str = Field(min_length=1, max_length=300)
 
 
 class TrainRequest(Api):
@@ -77,6 +103,9 @@ class Runtime:
     def areas(self, t: TenantInfo) -> AreaService:
         return AreaService(self.conn, t.db_name)
 
+    def payruns(self, t: TenantInfo) -> PayRunService:
+        return PayRunService(self.conn, t.db_name)
+
     def lookup(self, t: TenantInfo) -> PostgresLookupRepository:
         return PostgresLookupRepository(self.conn, t.db_name)
 
@@ -107,14 +136,18 @@ def _area(a: dict) -> dict[str, Any]:
 
 
 def _analysis(rt: Runtime, ctx: TenantContext, a, anomalies) -> dict[str, Any]:
-    refs = rt.payroll(ctx.tenant).get_user_refs(ctx.company_id, sorted({x.user_id for x in anomalies})) if anomalies else {}
+    learned = (a.summary or {}).get("learned", [])
+    ids = sorted({x.user_id for x in anomalies} | {x["userId"] for x in learned})
+    refs = rt.payroll(ctx.tenant).get_user_refs(ctx.company_id, ids) if ids else {}
     return {"analysisId": a.uid, "payRunId": a.pay_run_uid, "payrollPeriod": f"{a.period:%Y-%m}", "cycleCode": a.cycle_code,
             "isTrialRun": a.is_trial_run, "status": a.status, "modelVersion": a.model_version, "detector": a.detector,
             "mlStatus": a.ml_status, "totalEmployees": a.total_employees, "flaggedEmployees": len({x.user_id for x in anomalies}),
             "anomalyCount": len(anomalies), "maxSeverity": a.max_severity,
             "generatedAt": a.completed_on.isoformat() if a.completed_on else None,
             "warnings": (a.summary or {}).get("warnings", []), "riskScoreSemantics": RISK_SEMANTICS,
-            "errorCode": a.error_code, "anomalies": [_anomaly(x, refs) for x in anomalies]}
+            "errorCode": a.error_code, "anomalies": [_anomaly(x, refs) for x in anomalies],
+            "learned": [{**{k: v for k, v in x.items() if k != "userId"}, "employeeNo": refs.get(x["userId"], {}).get("employee_no")} for x in learned],
+            "lowered": (a.summary or {}).get("lowered", [])}
 
 
 def create_app(settings: Settings | None = None, runtime: Runtime | None = None) -> FastAPI:
@@ -214,11 +247,31 @@ def create_app(settings: Settings | None = None, runtime: Runtime | None = None)
         return {"areas": [{"area": k, **v} for k, v in AREAS.items()]}
 
     @app.get(p + "/identity/check")
-    def identity_check(ctx: TenantContext = Depends(subscribed)):
+    def identity_check(pay_run_id: str | None = None, ctx: TenantContext = Depends(subscribed)):
         require(ctx, settings.view_permission)
-        r = rt.areas(ctx.tenant).check_identification(ctx.company_id)
+        r = (rt.payruns(ctx.tenant).identity_for_run(ctx.company_id, pay_run_id) if pay_run_id
+             else rt.areas(ctx.tenant).check_identification(ctx.company_id))
         if r is None:
             raise NotFound("AREA_NOT_TRAINED", "Identification has not been trained for this company.")
+        return r
+
+    @app.post(p + "/identity/decisions", status_code=201)
+    def identity_decision(body: IdentityDecisionRequest, ctx: TenantContext = Depends(subscribed)):
+        require(ctx, settings.manage_permission)
+        return rt.payruns(ctx.tenant).decide_identity(ctx.company_id, body.pay_run_id, body.employee_no, body.anomaly_type,
+                                                      body.outcome, ctx.actor)
+
+    # pay runs: list (with PayShield check and release) and release once the Pay Score is 100 ------------------
+    @app.get(p + "/pay-runs")
+    def pay_runs(ctx: TenantContext = Depends(subscribed)):
+        require(ctx, settings.view_permission)
+        return {"payRuns": rt.payruns(ctx.tenant).list_runs(ctx.company_id)}
+
+    @app.post(p + "/pay-runs/{pay_run_id}/release")
+    def release_pay_run(pay_run_id: str, ctx: TenantContext = Depends(subscribed)):
+        require(ctx, settings.manage_permission)
+        r = rt.payruns(ctx.tenant).release(ctx.company_id, pay_run_id, ctx.actor)
+        log.info("pay run %s released by %s", r["name"], ctx.actor)
         return r
 
     @app.get(p + "/models/training-jobs/{job_id}")
@@ -235,6 +288,62 @@ def create_app(settings: Settings | None = None, runtime: Runtime | None = None)
         jobs = svc.repo.list_training_jobs(ctx.company_id, 1)
         return {"activeModel": _model(active) if active else None, "latestJob": _job(jobs[0]) if jobs else None,
                 "areas": [_area(a) for a in rt.areas(ctx.tenant).list_active(ctx.company_id)]}
+
+    @app.get(p + "/models/learning")
+    def model_learning(ctx: TenantContext = Depends(subscribed)):
+        from app.services.learning import FeedbackLearning
+
+        return FeedbackLearning(rt.conn, ctx.tenant.db_name).list(ctx.company_id)
+
+    @app.post(p + "/models/learning/{pattern_id}/forget")
+    def forget_pattern(pattern_id: str, ctx: TenantContext = Depends(subscribed)):
+        require(ctx, settings.manage_permission)
+        from app.services.learning import FeedbackLearning
+
+        if not FeedbackLearning(rt.conn, ctx.tenant.db_name).forget(ctx.company_id, pattern_id, ctx.actor):
+            raise NotFound("PATTERN_NOT_FOUND", "Nothing learned with that id.")
+        return {"forgotten": pattern_id}
+
+    # teach the agent: skills (taught answers / routes) and questions it could not answer ---------------------
+    def skills(ctx: TenantContext):
+        from app.services.agent_skills import AgentSkills
+
+        return AgentSkills(rt.conn, ctx.tenant.db_name)
+
+    @app.get(p + "/agent/skills")
+    def list_skills(ctx: TenantContext = Depends(subscribed)):
+        return {"skills": skills(ctx).list(ctx.company_id), "gaps": skills(ctx).gaps(ctx.company_id)}
+
+    @app.post(p + "/agent/skills/match")
+    def match_skill(body: QuestionRequest, ctx: TenantContext = Depends(subscribed)):
+        return skills(ctx).match(ctx.company_id, body.question)
+
+    @app.post(p + "/agent/skills", status_code=201)
+    def create_skill(body: SkillRequest, ctx: TenantContext = Depends(subscribed)):
+        require(ctx, settings.manage_permission)
+        return skills(ctx).create(ctx.company_id, body.phrases, body.kind, body.answer, body.route, ctx.actor)
+
+    @app.patch(p + "/agent/skills/{skill_id}")
+    def update_skill(skill_id: str, body: SkillUpdate, ctx: TenantContext = Depends(subscribed)):
+        if body.answer or body.route or body.add_phrase and body.helpful is None:
+            require(ctx, settings.manage_permission)
+        return skills(ctx).update(ctx.company_id, skill_id, add_phrase=body.add_phrase, answer=body.answer, route=body.route,
+                                  helpful=body.helpful, actor=ctx.actor)
+
+    @app.delete(p + "/agent/skills/{skill_id}", status_code=204)
+    def delete_skill(skill_id: str, ctx: TenantContext = Depends(subscribed)):
+        require(ctx, settings.manage_permission)
+        skills(ctx).delete(ctx.company_id, skill_id)
+
+    @app.post(p + "/agent/gaps", status_code=202)
+    def record_gap(body: QuestionRequest, ctx: TenantContext = Depends(subscribed)):
+        skills(ctx).record_gap(ctx.company_id, body.question)
+        return {"recorded": True}
+
+    @app.delete(p + "/agent/gaps/{gap_id}", status_code=204)
+    def dismiss_gap(gap_id: str, ctx: TenantContext = Depends(subscribed)):
+        require(ctx, settings.manage_permission)
+        skills(ctx).dismiss_gap(ctx.company_id, gap_id)
 
     @app.get(p + "/models/versions")
     def versions(ctx: TenantContext = Depends(subscribed)):
@@ -277,8 +386,11 @@ def create_app(settings: Settings | None = None, runtime: Runtime | None = None)
         return ctx
 
     @app.get(p + "/lookup/employees")
-    def lookup_employees(q: str | None = None, limit: int = 50, offset: int = 0, ctx: TenantContext = Depends(viewer)):
-        return rt.lookup(ctx.tenant).list_employees(ctx.company_id, q, max(1, min(limit, 200)), max(0, offset))
+    def lookup_employees(q: str | None = None, limit: int = 50, offset: int = 0, metric: Literal["basic", "net", "gross"] = "basic",
+                         min_amount: float | None = None, max_amount: float | None = None,
+                         sort: Literal["employee", "asc", "desc"] = "employee", ctx: TenantContext = Depends(viewer)):
+        return rt.lookup(ctx.tenant).list_employees(ctx.company_id, q, max(1, min(limit, 200)), max(0, offset), metric=metric,
+                                                    min_amount=min_amount, max_amount=max_amount, sort=sort)
 
     @app.get(p + "/lookup/employees/{employee_no}/pay-history")
     def lookup_history(employee_no: str, months: int = 6, ctx: TenantContext = Depends(viewer)):
@@ -290,6 +402,30 @@ def create_app(settings: Settings | None = None, runtime: Runtime | None = None)
     @app.get(p + "/lookup/pay-runs/totals")
     def lookup_totals(limit: int = 6, ctx: TenantContext = Depends(viewer)):
         return {"runs": rt.lookup(ctx.tenant).run_totals(ctx.company_id, max(1, min(limit, 24)))}
+
+    @app.get(p + "/lookup/pay-runs/{pay_run_id}/employees")
+    def lookup_run_employees(pay_run_id: str, ctx: TenantContext = Depends(viewer)):
+        r = rt.lookup(ctx.tenant).run_employees(ctx.company_id, pay_run_id)
+        if r is None:
+            raise NotFound("PAY_RUN_NOT_FOUND", f"No pay run {pay_run_id} in this company.")
+        return r
+
+    # pay forecast for future pay runs (scikit-learn, trained from this company's pay history; cached per data state)
+    forecasts: dict[tuple, dict] = {}
+
+    @app.get(p + "/forecast")
+    def pay_forecast(months: int = 3, ctx: TenantContext = Depends(viewer)):
+        from app.ml.forecast import forecast
+
+        rows = rt.lookup(ctx.tenant).pay_history_rows(ctx.company_id)
+        if len({r["period"] for r in rows}) < 6:
+            raise NotFound("NOT_ENOUGH_HISTORY", "At least 6 months of pay runs are needed to forecast.")
+        months = max(1, min(months, 12))
+        key = (ctx.tenant_uid, ctx.company_id, months, len(rows), max(r["period"] for r in rows), round(sum(float(r["net"]) for r in rows), 2))
+        if key not in forecasts:
+            forecasts.clear() if len(forecasts) > 50 else None
+            forecasts[key] = forecast(rows, months)
+        return forecasts[key]
 
     @app.get(p + "/lookup/pay-runs/compare")
     def lookup_compare(pay_run_id: str | None = None, against_pay_run_id: str | None = None, top: int = 10,

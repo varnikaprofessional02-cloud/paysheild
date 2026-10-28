@@ -10,15 +10,17 @@ from __future__ import annotations
 
 import random
 import time
+from datetime import date, timedelta
 from typing import Any
 
 from psycopg.types.json import Jsonb
 
 from app.db.connection import ConnectionManager
+from app.services.compliance_service import ComplianceService
 
 AREAS: dict[str, dict[str, Any]] = {
     "PAYROLL": {"label": "Payroll", "mock": False, "detail": "Pay anomalies per employee vs their own history (ML + 17 rules)"},
-    "IDENTIFICATION": {"label": "Identification", "mock": False, "detail": "Duplicate NRIC/FIN, shared bank accounts, work pass expiry, missing IDs, changes since training"},
+    "IDENTIFICATION": {"label": "Identification", "mock": False, "detail": "Duplicate NRIC/FIN, shared bank accounts, work pass expiry, missing IDs, changes since training; per pay run also CPF, MOM, Employment Act and approval checks"},
     "ATTENDANCE": {"label": "Attendance", "mock": True, "detail": "Clock-in patterns, buddy punching, missed clock-outs"},
     "EPM": {"label": "EPM", "mock": True, "detail": "Employee records: job, grade and contract consistency"},
     "TIMESHEET": {"label": "Timesheet", "mock": True, "detail": "Hours vs roster, unusual overtime claims"},
@@ -42,6 +44,37 @@ LEFT JOIN LATERAL (SELECT md5(ps.account_number) AS acct_h FROM employee.payment
                    WHERE pf.contract_id = ucc.id AND pf.company_id = %(c)s AND pf.is_active AND ps.account_number IS NOT NULL
                    ORDER BY pf.is_preferred DESC, ps.sort LIMIT 1) bank ON true
 WHERE ucc.company_id = %(c)s"""
+
+# the same identifiers as they were at the end of one pay period, for the employees paid in that pay run:
+# bank account = the payment profile effective on the period end; an NRIC or phone updated after the period end is unknown
+# for that period (its earlier value is not kept), so it is left out instead of being judged on today's value
+_PEOPLE_AT = """
+SELECT ucc.user_id, ucc.employee_no, ur.residency_type::text AS residency,
+       CASE WHEN ur.updated_on IS NULL OR ur.updated_on::date <= %(e)s THEN md5(ur.nric_no) END AS nric_h,
+       (ur.updated_on IS NOT NULL AND ur.updated_on::date > %(e)s) AS id_unknown,
+       wp.fin_h, wp.pass_expiry, bank.acct_h, bank.since AS bank_since, prev.acct_h AS prev_acct_h, NULL AS email_h,
+       CASE WHEN u.updated_on IS NULL OR u.updated_on::date <= %(e)s
+            THEN md5(nullif(regexp_replace(coalesce(u.ph_number, ''), '\\D', '', 'g'), '')) END AS phone_h,
+       true AS on_latest_run
+FROM payroll.pay_record pr
+JOIN employee.user_company_contract ucc ON ucc.id = pr.contract_id AND ucc.company_id = %(c)s
+JOIN security."user" u ON u.id = ucc.user_id
+LEFT JOIN employee.user_regulatory ur ON ur.user_id = ucc.user_id
+LEFT JOIN LATERAL (SELECT md5(upper(w.fin)) AS fin_h, w.pass_expiry_date AS pass_expiry FROM employee.epm_work_pass_records w
+                   WHERE w.regulatory_id = ur.id AND (w.cancellation_date IS NULL OR w.cancellation_date > %(e)s)
+                   ORDER BY w.pass_expiry_date DESC LIMIT 1) wp ON true
+LEFT JOIN LATERAL (SELECT md5(ps.account_number) AS acct_h, pf.effective_date AS since FROM employee.payment_profile pf
+                   JOIN employee.payment_split ps ON ps.payment_profile_id = pf.id
+                   WHERE pf.contract_id = ucc.id AND pf.company_id = %(c)s AND pf.effective_date <= %(e)s AND ps.account_number IS NOT NULL
+                   ORDER BY pf.effective_date DESC, pf.id DESC, ps.sort LIMIT 1) bank ON true
+LEFT JOIN LATERAL (SELECT md5(ps.account_number) AS acct_h FROM employee.payment_profile pf
+                   JOIN employee.payment_split ps ON ps.payment_profile_id = pf.id
+                   WHERE pf.contract_id = ucc.id AND pf.company_id = %(c)s AND pf.effective_date < bank.since AND ps.account_number IS NOT NULL
+                   ORDER BY pf.effective_date DESC, pf.id DESC, ps.sort LIMIT 1) prev ON true
+WHERE pr.pay_run_id = %(run)s"""
+
+_RUN = """SELECT r.id, r.name, to_date(pp.value, 'MM/YYYY') AS start FROM payroll.pay_run r JOIN payroll.pay_period pp ON pp.id = r.pay_period_id
+          WHERE pp.company_id = %(c)s AND r.uid = %(u)s::uuid"""
 
 _LATEST_RUN = """SELECT r.id, r.name FROM payroll.pay_run r JOIN payroll.pay_period pp ON pp.id = r.pay_period_id
                  WHERE pp.company_id = %(c)s ORDER BY to_date(pp.value, 'MM/YYYY') DESC, r.id DESC LIMIT 1"""
@@ -113,7 +146,10 @@ class AreaService:
                               ms=int((time.perf_counter() - t0) * 1000), summary=summary, baseline=baseline)
 
     # checks ------------------------------------------------------------------------------------
-    def check_identification(self, company_id: int) -> dict | None:
+    def check_identification(self, company_id: int, pay_run_uid: str | None = None) -> dict | None:
+        """Identity checks. With a pay run: as at the end of that pay period, for the employees paid in it."""
+        if pay_run_uid:
+            return self._check_period(company_id, pay_run_uid)
         m = self._all("""SELECT version, baseline, trained_on FROM times_intelligence.area_model
                          WHERE company_id = %(c)s AND area = 'IDENTIFICATION' AND status = 'ACTIVE'""", {"c": company_id})
         if not m:
@@ -127,12 +163,36 @@ class AreaService:
                 "flaggedEmployees": len({f["employeeNo"] for f in findings}), "findingCount": len(findings),
                 "byType": _count(findings), "durationMs": int((time.perf_counter() - t0) * 1000), "findings": findings}
 
-    @staticmethod
-    def _checks(people: list[dict], baseline: dict | None) -> list[dict]:
-        out: list[dict] = []
-        from datetime import date
+    def _check_period(self, company_id: int, pay_run_uid: str) -> dict | None:
+        m = self._all("""SELECT version, trained_on FROM times_intelligence.area_model
+                         WHERE company_id = %(c)s AND area = 'IDENTIFICATION' AND status = 'ACTIVE'""", {"c": company_id})
+        run = self._all(_RUN, {"c": company_id, "u": pay_run_uid})
+        if not m or not run:
+            return None
+        t0 = time.perf_counter()
+        start = run[0]["start"]
+        end = date(start.year + (start.month == 12), start.month % 12 + 1, 1) - timedelta(days=1)
+        people = self._all(_PEOPLE_AT, {"c": company_id, "run": run[0]["id"], "e": end})
+        findings = self._checks(people, None, asof=end)
+        for p in people:  # bank account switched during this pay period
+            if p["bank_since"] and start <= p["bank_since"] <= end and p["prev_acct_h"] and p["prev_acct_h"] != p["acct_h"]:
+                findings.append(_f(p["employee_no"], "ID-006", "BANK_ACCOUNT_CHANGED", "HIGH", 85,
+                                   f"Bank account changed on {p['bank_since']:%d %b %Y}, so this pay run goes to a new account.",
+                                   "Confirm the new account with the employee through a known contact before releasing pay.",
+                                   field="Bank account", changedOn=str(p["bank_since"])))
+        # compliance checks (CPF, MOM, Employment Act, approvals) on the same pay run; decided and released the same way
+        findings += ComplianceService(self.conn, self.db).check(company_id, run[0]["id"], start, end)
+        findings.sort(key=lambda f: -f["riskScore"])
+        return {"area": "IDENTIFICATION", "modelVersion": m[0]["version"], "trainedOn": m[0]["trained_on"].isoformat(),
+                "payRun": run[0]["name"], "asOf": str(end), "employees": len(people),
+                "flaggedEmployees": len({f["employeeNo"] for f in findings}), "findingCount": len(findings),
+                "byType": _count(findings), "durationMs": int((time.perf_counter() - t0) * 1000), "findings": findings}
 
-        today = date.today()
+    @staticmethod
+    def _checks(people: list[dict], baseline: dict | None, asof=None) -> list[dict]:
+        out: list[dict] = []
+        today = asof or date.today()
+        word = "the period end" if asof else "today"
 
         def shared(key: str) -> dict[str, list[dict]]:
             groups: dict[str, list[dict]] = {}
@@ -158,13 +218,15 @@ class AreaService:
                 days = (p["pass_expiry"] - today).days
                 if days < 0:
                     out.append(_f(p["employee_no"], "ID-003", "WORK_PASS_EXPIRED", "HIGH", 90 if p["on_latest_run"] else 70,
-                                  f"Work pass expired {-days} day(s) ago ({p['pass_expiry']}) but the employee is still on payroll.",
+                                  f"Work pass expired {-days} day(s) before {word} ({p['pass_expiry']}) but the employee is still on payroll.",
                                   "Stop pay until a valid pass is on file; check MOM for renewal.", expiry=str(p["pass_expiry"])))
                 elif days <= 30:
                     out.append(_f(p["employee_no"], "ID-003", "WORK_PASS_EXPIRING", "MEDIUM", 60,
-                                  f"Work pass expires in {days} day(s) ({p['pass_expiry']}).",
+                                  f"Work pass expires {days} day(s) after {word} ({p['pass_expiry']}).",
                                   "Start the renewal now so pay is not held next month.", expiry=str(p["pass_expiry"])))
-            if p["residency"] == "SingaporeanOrSPR" and not p["nric_h"] or p["residency"] == "WorkPassHolder" and not p["fin_h"]:
+            if p.get("id_unknown"):
+                pass
+            elif p["residency"] == "SingaporeanOrSPR" and not p["nric_h"] or p["residency"] == "WorkPassHolder" and not p["fin_h"]:
                 out.append(_f(p["employee_no"], "ID-004", "MISSING_ID", "HIGH", 80 if p["on_latest_run"] else 65,
                               f"No {'NRIC' if p['residency'] == 'SingaporeanOrSPR' else 'FIN / work pass'} on file for a {('citizen/PR' if p['residency'] == 'SingaporeanOrSPR' else 'work pass holder')}.",
                               "Add the identity document before paying; CPF and IR8A need it."))

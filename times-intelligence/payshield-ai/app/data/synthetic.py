@@ -12,6 +12,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import date, datetime
 
+from app.rules.sg_statutory import ow_ceiling
 from app.domain.models import (
     CompanyRef, ConfiguredPayItem, PayCodeMaster, PayItem, PayRecordSnapshot, PayRunRef, SalaryRevision,
 )
@@ -43,6 +44,7 @@ class SyntheticUser:
     has_meal: bool
     has_ot: bool
     loan_until: date | None
+    foreign: bool = False  # work pass holder: not liable for CPF
 
 
 @dataclass
@@ -83,7 +85,7 @@ def build_record(sc: SyntheticCompany, run: PayRunRef, u: SyntheticUser, *, basi
     allowance = round(sum(i.amount for i in items if i.is_earning), 2)
     deduct = round(sum(i.amount for i in items if not i.is_earning), 2)
     gross = earned + allowance - deduct
-    ow = min(earned + sum(i.amount for i in items if i.is_earning and not i.is_aw), 7400.0)
+    ow = min(earned + sum(i.amount for i in items if i.is_earning and not i.is_aw), ow_ceiling(run.period.year))
     aw = sum(i.amount for i in items if i.is_earning and i.is_aw)
     ee = round((ow + aw) * 0.20, 2) if cpf_assessed else None
     er = round((ow + aw) * 0.17, 2) if cpf_assessed else None
@@ -125,7 +127,8 @@ def _run(sc: SyntheticCompany, period: date, rng: random.Random, cycle: str = "E
 
 
 def generate_company(seed: int, *, tenant_uid: str, company: CompanyRef, n_employees: int = 60, months: int = 24,
-                     start: date = date(2024, 10, 1), user_id_offset: int = 0) -> SyntheticCompany:
+                     start: date = date(2024, 10, 1), user_id_offset: int = 0, foreign_every: int | None = None) -> SyntheticCompany:
+    """foreign_every=7 makes every 7th employee (index 3, 10, ...) a work pass holder without CPF."""
     rng = random.Random(seed)
     sc = SyntheticCompany(tenant_uid, company)
     end = add_months(start, months - 1)
@@ -136,7 +139,8 @@ def generate_company(seed: int, *, tenant_uid: str, company: CompanyRef, n_emplo
             uid_, _uid(rng), f"E{uid_:05d}", 50000 + uid_, hired,
             round(min(15000.0, max(2500.0, rng.lognormvariate(8.4, 0.35))), -1),
             rng.random() < 0.5, rng.random() < 0.3,
-            add_months(start, rng.randint(2, max(2, months))) if rng.random() < 0.2 else None)
+            add_months(start, rng.randint(2, max(2, months))) if rng.random() < 0.2 else None,
+            bool(foreign_every) and k % foreign_every == 3)
         u = sc.users[uid_]
         for code, amt, on in (("TRAN", 200.0, True), ("MEAL", 150.0, u.has_meal)):
             if on:
@@ -155,7 +159,7 @@ def generate_company(seed: int, *, tenant_uid: str, company: CompanyRef, n_emplo
                                                    datetime(p.year, p.month, 1)))
             new_hire = p == u.hired and u.hired != start
             earned = round(u.basic * rng.uniform(0.4, 0.9), 2) if new_hire else None
-            sc.records.append(build_record(sc, run, u, basic=u.basic, basic_earned=earned,
+            sc.records.append(build_record(sc, run, u, basic=u.basic, basic_earned=earned, cpf_assessed=not u.foreign,
                                            items=_items_for(u, p, rng, u.basic), is_new_hire=new_hire))
     assert end == sc.runs[-1].period
     return sc
@@ -164,6 +168,9 @@ def generate_company(seed: int, *, tenant_uid: str, company: CompanyRef, n_emplo
 SCENARIOS = ("salary_increase_no_revision", "duplicate_allowance", "missing_recurring_allowance", "unusual_overtime",
              "unexpected_net_increase", "new_large_deduction", "cpf_missing",
              "approved_promotion", "december_bonus", "normal")
+# compliance problems (checked by app.services.compliance_service)
+COMPLIANCE_SCENARIOS = ("ot_over_limit", "ot_rate_low", "deduction_over_half", "cpf_on_foreigner", "aw_over_ceiling",
+                        "sdl_missing", "shg_missing", "one_off_payment", "paid_twice", "salary_typo")
 
 
 def make_analysis_run(sc: SyntheticCompany, scenarios: dict[int, str], *, seed: int = 7
@@ -177,7 +184,8 @@ def make_analysis_run(sc: SyntheticCompany, scenarios: dict[int, str], *, seed: 
     out, revs = [], []
     for u in sc.users.values():
         s = scenarios.get(u.user_id, "normal")
-        basic, items, cpf = u.basic, _items_for(u, period, rng, u.basic), True
+        basic, items, cpf = u.basic, _items_for(u, period, rng, u.basic), not u.foreign
+        rate = round(u.basic / 173.0 * 1.5, 2)
         if s == "salary_increase_no_revision":
             basic = round(u.basic * 1.5, -1)
         elif s == "approved_promotion":
@@ -199,5 +207,27 @@ def make_analysis_run(sc: SyntheticCompany, scenarios: dict[int, str], *, seed: 
             cpf = False
         elif s == "december_bonus":
             items.append(_item("AWS", u.basic, rng, recurring=4))
-        out.append(build_record(sc, run, u, basic=basic, items=items, cpf_assessed=cpf))
+        elif s == "ot_over_limit":
+            items = [i for i in items if i.code != OT_CODE] + [_item(OT_CODE, 84 * rate, rng, recurring=5, frequency=84, rate=rate)]
+        elif s == "ot_rate_low":  # paid at the normal hourly rate instead of 1.5x
+            low = round(u.basic / 190.67, 2)
+            items = [i for i in items if i.code != OT_CODE] + [_item(OT_CODE, 20 * low, rng, recurring=5, frequency=20, rate=low)]
+        elif s == "deduction_over_half":
+            items.append(_item("ADV", round(u.basic * 0.62, 2), rng, recurring=5))
+        elif s == "cpf_on_foreigner":
+            cpf = True
+        elif s == "aw_over_ceiling":  # a large retention bonus paid as Additional Wages with CPF on all of it
+            items.append(_item("AWS", max(u.basic * 4, 60000.0), rng, recurring=4))
+        elif s == "one_off_payment":
+            items.append(PayItem("INCT", "Special incentive", True, round(max(800.0, u.basic * 0.3), -1), "Ordinary", 5, 0, None, 1.0, _uid(rng)))
+        elif s == "salary_typo":  # 10x the salary keyed in
+            basic = round(u.basic * 10, -1)
+        rec = build_record(sc, run, u, basic=basic, items=items, cpf_assessed=cpf)
+        if s == "sdl_missing":
+            rec.sdl = 0.0
+        elif s == "shg_missing":
+            rec.community_funds = 0.0
+        out.append(rec)
+        if s == "paid_twice":
+            out.append(build_record(sc, run, u, basic=basic, items=items, cpf_assessed=cpf))
     return run, out, revs

@@ -12,6 +12,7 @@ from app.core.errors import Conflict, Forbidden, NotFound, ValidationFailed
 from app.core.tenant_context import TenantContext
 from app.db.interfaces import AnalysisRecord, AnomalyRecord, PayrollReadRepository, PayShieldRepository, TrainingAlreadyInProgress
 from app.domain.enums import AnalysisStatus, FeedbackOutcome, MlStatus, TrainingStatus
+from app.services import learning
 from app.domain.models import CompanyRef
 from app.ml.model_registry import ModelRegistry
 from app.ml.predictor import BundleScorer
@@ -34,6 +35,11 @@ LOCAL_DEV_REVIEWER = "00000000-0000-4000-8000-00000000d0e0"  # fixed reviewer id
 class PayShieldService:
     def __init__(self, settings: Settings, payroll: PayrollReadRepository, repo: PayShieldRepository, registry: ModelRegistry):
         self.s, self.payroll, self.repo, self.registry = settings, payroll, repo, registry
+
+    def _learner(self):
+        """What the company model learned from review decisions (needs the PostgreSQL repository)."""
+        conn = getattr(self.repo, "conn", None)
+        return learning.FeedbackLearning(conn, self.repo.db) if conn is not None else None
 
     def _company(self, ctx: TenantContext) -> CompanyRef:
         return CompanyRef(ctx.company_id, ctx.company_uid, ctx.tenant_uid)
@@ -81,16 +87,20 @@ class PayShieldService:
                                        _r(f.expected_low), _r(f.expected_high), f.expected_method, f.change_pct,
                                        f.is_explained, f.description, f.recommended_action,
                                        [e.to_dict() for e in f.evidence], f.features) for f in outcome.findings]
-            sev = outcome.max_severity
+            # apply what reviewers taught the model: accepted patterns are not raised again, often-accepted types are lowered
+            learner = self._learner()
+            learned, lowered = [], []
+            if learner is not None:
+                anomalies, learned, lowered = learner.apply(ctx.company_id, anomalies)
             analysis.status = (AnalysisStatus.COMPLETED_WITH_WARNINGS if outcome.warnings or scorer.ml_status in
                                (MlStatus.MODEL_UNAVAILABLE.value,) else AnalysisStatus.COMPLETED).value
             analysis.model_registry_id, analysis.model_version = model_id, scorer.model_version
             analysis.detector, analysis.ml_status = scorer.detector, scorer.ml_status
             analysis.total_records, analysis.total_employees = outcome.total_records, outcome.total_employees
-            analysis.flagged_employees = len(outcome.flagged_user_ids)
-            analysis.max_severity = sev.value if sev else None
+            analysis.flagged_employees = len({a.user_id for a in anomalies})
+            analysis.max_severity = learning.max_severity(anomalies)
             analysis.summary = {"warnings": warnings, "by_type": _count(a.anomaly_type for a in anomalies),
-                                "by_severity": _count(a.severity for a in anomalies)}
+                                "by_severity": _count(a.severity for a in anomalies), "learned": learned, "lowered": lowered}
             self.repo.complete_analysis(ctx.company_id, analysis.id, analysis, anomalies)
             log.info("analysis completed", extra={"analysis_uid": analysis.uid, "count": len(anomalies), "status": analysis.status})
         except Exception as exc:
@@ -188,9 +198,12 @@ class PayShieldService:
         anomaly = self.repo.get_anomaly(ctx.company_id, anomaly_uid)
         if anomaly is None or not ctx.access.allows(anomaly.user_id):
             raise NotFound("ANOMALY_NOT_FOUND", "Anomaly not found.")
-        # stored for evaluation and future supervised training; no automatic retraining on feedback
         reviewer = LOCAL_DEV_REVIEWER if ctx.is_service else ctx.principal.subject  # service login only reaches here in local
-        return self.repo.add_feedback(ctx.company_id, anomaly.id, outcome, comment, reviewer)
+        fb = self.repo.add_feedback(ctx.company_id, anomaly.id, outcome, comment, reviewer)
+        learner = self._learner()
+        if learner is not None:  # the model learns from the decision straight away (next analysis uses it)
+            learner.learn(ctx.company_id, anomaly, outcome, ctx.actor)
+        return fb
 
 
 def _r(v):

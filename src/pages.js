@@ -91,7 +91,7 @@ export function buildPages(h) {
       crumb: 'PayShield › <b>Trust Check</b>',
       body: () => {
         const r = runSummary(S.issues), ps = payScore(S.issues), tc = S.tc || {};
-        if (S.approved) return `<div class="card ps-approved"><div class="ps-big-ok">✓</div><h3 style="font-size:22px;margin:6px 0">September 2026 pay run approved</h3>
+        if (S.approved) return `<div class="card ps-approved"><div class="ps-big-ok">✓</div><h3 style="font-size:22px;margin:6px 0">${RUN.name} pay run approved</h3>
           <p class="muted">${RUN.headcount - S.issues.filter((i) => i.id === 'lim' && i.state === 'fixed').length} employees paid on ${RUN.payDate}. Trust Check passed: Pay Score ${ps.score}/100.</p>
           <div class="stats ps-stats" style="margin-top:14px">${statCard(ICON.circleCheck, 'Kept from being paid wrongly', money(r.protectedAmt), 'fixed in the guards before payday', 'good')}${statCard(ICON.alert, 'Issues found', `${S.issues.length}`, 'all resolved or accepted')}${statCard(ICON.users, 'Records reviewed by a person', `${S.issues.length}`, `instead of ${RUN.headcount}`)}${statCard(ICON.library, 'Rule versions recorded', `${RULES.length}`, 'for audit replay')}</div>
           <div style="display:flex;gap:8px;justify-content:center;margin-top:16px"><button class="btn" data-act="resetRun">Reset demo</button><button class="btn p" data-act="page:records">Open the pay run record</button></div></div>`;
@@ -101,7 +101,7 @@ export function buildPages(h) {
           if (off) return `<div class="tc-row off"><span class="ps-gic sm">${ICON[g.icon]}</span><div class="tc-mid"><b>${g.name}</b><span class="small muted">Turned off for ${off.scope === 'run' ? 'this run' : 'all runs'} by ${esc(off.by)} · “${esc(off.reason)}”</span><div class="tc-bar"><i style="width:0"></i></div></div><div class="tc-res"><span class="tag t-n">Off · not checked</span></div><div class="tc-go"><button class="linkbtn" data-act="page:${k}">Turn on</button></div></div>`;
           const state = tc.running ? (n < tc.stage ? 'done' : n === tc.stage ? 'run' : 'wait') : 'done';
           const fail = state === 'done' && o.length;
-          const res = state === 'wait' ? '<span class="small muted">Waiting</span>' : state === 'run' ? '<span class="small muted">Checking 219 records…</span>'
+          const res = state === 'wait' ? '<span class="small muted">Waiting</span>' : state === 'run' ? '<span class="small muted">Checking ${RUN.headcount} records…</span>'
             : o.length ? `<span class="tag ${held ? 't-r' : 't-o'}">${o.length} failed${held ? ` · ${held} held` : ''}</span><span class="small"><b>${money(o.reduce((s2, i) => s2 + i.impact, 0))}</b> at risk</span>` : '<span class="tag t-g">✓ Passed</span>';
           return `<div class="tc-row ${fail ? (held ? 'fail-h' : 'fail') : state === 'done' ? 'pass' : state}"><span class="ps-gic sm">${ICON[g.icon]}</span>
             <div class="tc-mid"><b>${g.name}</b><span class="small muted">${g.q}</span><div class="tc-bar"><i style="width:${state === 'done' ? 100 : state === 'run' ? 55 : 0}%"></i></div></div>

@@ -75,6 +75,9 @@ def main() -> None:
     print(f"3. times_intelligence schema in {a.db}")
     psql(a.db, DB / "migrations/V001__times_intelligence_schema.sql")
     psql(a.db, DB / "migrations/V002__training_areas.sql")
+    psql(a.db, DB / "migrations/V003__pay_run_release.sql")
+    psql(a.db, DB / "migrations/V004__feedback_learning.sql")
+    psql(a.db, DB / "migrations/V005__agent_skills.sql")
 
     settings = Settings(environment="local", db={"host": a.host, "port": a.port, "username": a.user, "password": pw,
                                                   "sslmode": "disable", "tenant_store_database": TS_DB},
