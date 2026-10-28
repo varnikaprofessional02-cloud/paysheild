@@ -1,6 +1,6 @@
 // PayShield Agent page (orchestrator + Q&A) and Pay run records page.
 import { ICON } from './chrome.js';
-import { GUARDS, HISTORY, RUN, money, pendingIn, payScore, GUARD_SWITCH, kindRemoves } from './company.js';
+import { GUARDS, HISTORY, RUN, money, pendingIn, payScore, GUARD_SWITCH } from './company.js';
 import { PLAN, isRunRequest, runPayShield, buildReport, aiSummary, tok } from './agentrun.js';
 import { askAgent } from './agent.js';
 import { getSample } from './ai.js';
@@ -51,7 +51,7 @@ function reportHtml(m, S) {
 function msgHtml(m, S) {
   if (m.me) return `<div class="msg me"><div class="bubble">${esc(m.text)}</div></div>`;
   if (m.kind === 'run') return `<div class="msg"><div class="bubble ar-bubble"><div class="ar-head">${ICON.bot}<b>PayShield Agent</b><span class="small muted">${m.running ? 'Running PayShield…' : `Checked at ${m.at}`}</span></div>${m.running ? stepsHtml(m) : `<details class="ar-tools"><summary><b style="color:var(--good)">✓</b> PayShield ran ${m.steps.length} read-only tools · names masked · numbers checked <span class="muted">(show)</span></summary>${stepsHtml(m)}</details>`}${m.report ? reportHtml(m, S) : ''}</div></div>`;
-  if (m.kind === 'note') return `<div class="msg"><div class="bubble ar-note ${m.warn ? 'warn' : ''}">${m.html}</div></div>`;
+  if (m.kind === 'note') return `<div class="msg"><div class="bubble ar-note">${m.html}</div></div>`;
   if (m.kind === 'q') return qHtml(m, S);
   if (m.kind === 'summary') return summaryHtml(m, S);
   if (m.kind === 'final') return finalHtml(m, S);
@@ -65,7 +65,7 @@ function qHtml(m, S) {
   return `<div class="msg"><div class="bubble ar-bubble ar-q ${d ? 'answered' : ''}"><div class="ar-head">${ICON.bot}<b>PayShield Agent</b><span class="small muted">Finding ${m.n} of ${m.of} · ${g.name}</span></div>
     <div class="ar-q-title">${st(i.status)} <b>${esc(i.name)}</b> <span class="muted small">${esc(i.dept)} · Trust ${i.score}</span></div>
     <p class="ar-q-text">${esc(i.title)}.</p>
-    ${d ? (kindRemoves(i, d.kind) ? `<div class="ar-q-done warn">⚠ You chose <b>${d.key} · ${esc(d.label)}</b> at ${d.at}. ${esc(d.effect)} <span class="tag t-o">Removed from this run</span> <span class="tag t-n">Saved to ${g.name}</span></div>` : `<div class="ar-q-done">✓ You chose <b>${d.key} · ${esc(d.label)}</b> at ${d.at}. ${esc(d.effect)} <span class="tag t-g">Saved to ${g.name}</span></div>`) : `
+    ${d ? `<div class="ar-q-done">✓ You chose <b>${d.key} · ${esc(d.label)}</b> at ${d.at}. ${esc(d.effect)} <span class="tag t-g">Saved to ${g.name}</span></div>` : `
     <div class="ar-facts"><div><span class="ar-lbl">Checked</span>${esc(i.param[0])}: <b>${esc(i.param[1])}</b> · rule: ${esc(i.param[2])}</div><div><span class="ar-lbl">Rule</span>${esc(i.ref)}</div><div><span class="ar-lbl">History</span>${esc(i.hist)}</div><div><span class="ar-lbl">At risk</span><b>${money(i.impact, i.impact % 1 ? 2 : 0)}</b> if paid as it is</div></div>
     <p class="ar-q-ask"><b>How do you want to fix this?</b> I recommend <b>A</b>, because ${esc(whyRecommended(i))}</p>
     <div class="ar-opts">${opts.map((o) => `<button class="ar-opt ${o.recommended ? 'rec' : ''}" data-act="agPick:${i.id}|${o.kind}"><span class="ar-key">${o.key}</span><span><b>${esc(o.label)}</b>${o.recommended ? ' <span class="tag t-b">Recommended</span>' : ''}<span class="small muted">${esc(o.effect)}</span></span></button>`).join('')}</div>
@@ -81,7 +81,7 @@ function summaryHtml(m, S) {
   return `<div class="msg"><div class="bubble ar-bubble"><div class="ar-head">${ICON.bot}<b>PayShield Agent</b><span class="small muted">All findings decided</span></div>
     <div class="ar-score">${scoreRing(plan.ps.score, !plan.ps.open)}<div><div class="eyebrow">Pay Score</div><b style="font-size:18px">${plan.ps.score}/100 · ${plan.ps.verdict}</b><div class="small muted">All ${plan.adjustments} decisions saved to PayShield · Trust Check ${payScore(S.issues).score}/100</div></div></div>
     <p class="ar-sum" style="margin:10px 0">${cnt('fix')} fixed as recommended, ${cnt('alt')} accepted with a reason, ${cnt('hold')} left out of this run. ${summaryLine(plan)}.</p>
-    <div class="tblwrap"><table class="g" style="min-width:0"><thead><tr><th>Employee</th><th>Guard</th><th>Your decision</th><th>Saved to</th></tr></thead><tbody>${ds.map(([i, d]) => `<tr class="${kindRemoves(i, d.kind) ? 'ar-rm' : ''}"><td class="small"><b>${esc(i.name)}</b></td><td class="small">${GUARDS[i.guard].short}</td><td class="small"><b>${d.key}</b> · ${esc(d.label)}${kindRemoves(i, d.kind) ? ' <span class="tag t-o">⚠ Removed from run</span>' : ''}</td><td class="small"><span class="tag ${kindRemoves(i, d.kind) ? 't-n' : 't-g'}">${GUARDS[i.guard].name}</span></td></tr>`).join('')}</tbody></table></div>
+    <div class="tblwrap"><table class="g" style="min-width:0"><thead><tr><th>Employee</th><th>Guard</th><th>Your decision</th><th>Saved to</th></tr></thead><tbody>${ds.map(([i, d]) => `<tr><td class="small"><b>${esc(i.name)}</b></td><td class="small">${GUARDS[i.guard].short}</td><td class="small"><b>${d.key}</b> · ${esc(d.label)}</td><td class="small"><span class="tag t-g">${GUARDS[i.guard].name}</span></td></tr>`).join('')}</tbody></table></div>
     <div class="ar-done" style="margin-top:10px">✓ PayShield is up to date: ${sess.saved.length} decisions saved to their guards. Trust Check and the guard pages already show them.</div>
     ${act}</div></div>`;
 }
@@ -170,8 +170,7 @@ export function agentActions(h) {
     saved = savePermanent(i, kind, d.label, d.effect, 'agent session');
     const after = payScore(sessionIssues(S.issues, sess)).score;
     S.agent.msgs.push({ me: true, text: `${d.key} · ${d.label}` });
-    const rmv = kindRemoves(i, kind);
-    S.agent.msgs.push({ kind: 'note', warn: rmv, html: `${rmv ? `⚠ <b>${esc(i.name)} removed from this pay run.</b> Saved to <b>${GUARDS[i.guard].name}</b>:` : `✓ Saved to <b>${GUARDS[i.guard].name}</b>:`} ${esc(d.effect)} Trust Check ${saved.before} → <b>${saved.after}</b>.${nextId(sess) ? ` Next: ${sess.idx + 1} of ${sess.queue.length}.` : ''}` });
+    S.agent.msgs.push({ kind: 'note', html: `✓ Saved to <b>${GUARDS[i.guard].name}</b>: ${esc(d.effect)} Trust Check ${saved.before} → <b>${saved.after}</b>.${nextId(sess) ? ` Next: ${sess.idx + 1} of ${sess.queue.length}.` : ''}` });
     askNext();
   }
   const send = (text) => {

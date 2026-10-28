@@ -137,7 +137,7 @@ export function setPsMenu(fn) { psFn = fn; }
 const psItem = (it, active) => {
   const on = it.k === active;
   const badge = it.count ? `<span class="cnt ${it.held ? 'cnt-red' : 'cnt-amb'}" aria-label="${it.count} to review">${it.count}</span>` : (it.count === 0 ? '<span class="ps-ok" aria-label="all clear">✓</span>' : (it.tag || ''));
-  return `<button type="button" class="nv ps-nv ${on ? 'on' : ''}" data-act="${it.act}" ${on ? 'aria-current="page"' : ''}><span class="nv-ic nv-ic-dot">${ICON[it.icon] || ICON.shield}</span><span class="nv-tx">${it.label}</span>${badge}</button>`;
+  return `<button type="button" class="nv ps-nv ${on ? 'on' : ''}" data-act="${it.act}" ${on ? 'aria-current="page"' : ''}><span class="nv-ic nv-ic-dot">${ICON[it.icon] || ICON.shield}${it.count ? '<i class="red-dot" aria-hidden="true"></i>' : ''}</span><span class="nv-tx">${it.label}</span>${badge}</button>`;
 };
 export function psShell(crumb, body, user = 'VR', role) {
   const m = psFn();
