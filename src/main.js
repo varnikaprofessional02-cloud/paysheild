@@ -358,7 +358,7 @@ const MENU_ITEMS = () => [
   ...TI.menu(),
   { label: 'PayShield', items: [
     { k:'tiPayShield', label:'PayShield', icon:'gauge', act:'page:tiPayShield' },
-    { k:'tiPayRun', label:'Pay runs', icon:'receipt', act:'page:tiPayRun' },
+    { k:'tiOnHold', label:'On Hold', icon:'clock', act:'page:tiOnHold', count: TI.heldCount() || 0 },
     { k:'agent', label:'PayShield Agent', icon:'bot', act:'page:agent', tag:'<span class="new">AI</span>' } ] },
 ];
 setPsMenu(() => ({ company: CO, pending: pendingIn(S.issues).length, active: S.mode === 'page' ? S.page : SC_MODULE[S.sc], groups: MENU_ITEMS() }));

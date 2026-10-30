@@ -87,6 +87,11 @@ export function payShield({ api, isTrained, render, toast, go }) {
   const runOf = (y, m) => (P.runs || []).find((r) => r.period === key(y, m));
   const years = () => [...new Set([now.getFullYear(), ...(P.runs || []).map((r) => +r.period.slice(3))])].sort((a, b) => b - a);
   const latestRun = () => (P.runs || [])[0];
+  // employees taken out of a pay run (On Hold); kept in this browser, per pay run: { runUid: { employeeNo: { name, on } } }
+  const HOLD_KEY = 'payshield-on-hold';
+  const H = (() => { try { return JSON.parse(localStorage.getItem(HOLD_KEY)) || {}; } catch { return {}; } })();
+  const saveHold = () => { try { localStorage.setItem(HOLD_KEY, JSON.stringify(H)); } catch { /* storage off: kept for this session */ } };
+  const holdOf = (run) => (run && H[run.uid]) || {};
 
   function toIssues(analysis, identity) {
     const byNo = Object.fromEntries((P.people || []).map((e) => [e.employee_no, e]));
@@ -137,8 +142,9 @@ export function payShield({ api, isTrained, render, toast, go }) {
   const view = (run) => {
     const a = run && P.byPeriod[run.period];
     if (!a || a === 'none') return null;
-    const issues = toIssues(a, identFor(run));
-    return { a, issues, s: score(issues, a.totalEmployees) };
+    const all = toIssues(a, identFor(run)), hold = holdOf(run);
+    const issues = all.filter((i) => !hold[i.no]), parked = all.filter((i) => hold[i.no]);
+    return { a, issues, parked, held: Object.keys(hold), s: score(issues, a.totalEmployees - Object.keys(hold).length) };
   };
 
   async function loadAll() {
@@ -173,20 +179,34 @@ export function payShield({ api, isTrained, render, toast, go }) {
     } catch (e) { P.err = e.message; } finally { P.busy = ''; render(); }
   }
 
-  async function decide(id, how) {
-    const v = view(runOf(P.year, P.month)), i = v?.issues.find((x) => x.id === +id);
+  async function decide(id, how, uid) {
+    const run = (uid && (P.runs || []).find((r) => r.uid === uid)) || runOf(P.year, P.month);
+    const v = view(run), i = v && [...v.issues, ...v.parked].find((x) => x.id === +id);
     if (!i) return;
     const outcome = how === 'fix' ? 'CONFIRMED_ERROR' : how === 'alt' ? 'EXPECTED_CHANGE' : 'NEEDS_INVESTIGATION';
-    const run = runOf(P.year, P.month);
     await Promise.all([
       ...i.ids.map((aid) => api('/api/v1/payroll/feedback', { method: 'POST', body: JSON.stringify({ anomalyId: aid, outcome }) })),
       ...i.idf.map((f) => api('/api/v1/identity/decisions', { method: 'POST', body: JSON.stringify({ payRunId: run.uid, employeeNo: f.employeeNo, anomalyType: f.anomalyType, outcome }) })),
     ]);
     v.a.anomalies.filter((x) => i.ids.includes(x.anomalyId)).forEach((x) => { x.latestFeedback = outcome; });
     i.idf.forEach((f) => { const g = identFor(run)?.findings.find((y) => y.employeeNo === f.employeeNo && y.anomalyType === f.anomalyType); if (g) g.latestFeedback = outcome; });
-    const after = view(runOf(P.year, P.month)).s;
-    const taught = how === 'alt' && i.ids.length ? `<br>🧠 Learned: ${esc(typeName(i.top.anomalyType).toLowerCase())} at ${esc(i.param[1])} is normal for ${esc(i.name)}; it won’t be flagged again.` : how !== 'alt' && i.ids.length ? '<br>🧠 Anything the model learned from this finding was removed.' : '';
+    const after = view(run).s, taught = taughtNote(i, how);
+    if (v.parked.includes(i)) { toast(how === 'undo' ? `<b>${esc(i.name)}</b> is open again (still on hold)` : `<b>${esc(i.name)} ${how === 'fix' ? 'fixed' : 'accepted'}</b> (on hold)${taught}`); render(); return; }
     toast(how === 'undo' ? `<b>${esc(i.name)}</b> is open again · Pay Score ${after.score}${taught}` : `<b>${esc(i.name)} ${how === 'fix' ? 'fixed' : 'accepted'}.</b> Pay Score ${v.s.score} → <b>${after.score}</b>${after.score === 100 ? ' · 🎉 ready to run payroll' : ''}${taught}`);
+    render();
+  }
+  const taughtNote = (i, how) => (how === 'alt' && i.ids.length ? `<br>🧠 Learned: ${esc(typeName(i.top.anomalyType).toLowerCase())} at ${esc(i.param[1])} is normal for ${esc(i.name)}; it won’t be flagged again.` : how !== 'alt' && i.ids.length ? '<br>🧠 Anything the model learned from this finding was removed.' : '');
+
+  // take an employee out of this pay run (all their findings move to On Hold) or bring them back
+  function hold(no, back, uid) {
+    const run = (uid && (P.runs || []).find((r) => r.uid === uid)) || runOf(P.year, P.month), v = view(run);
+    if (!v || run.locked) return;
+    const name = (P.people || []).find((e) => e.employee_no === no)?.name || no;
+    if (back) { delete H[run.uid][no]; if (!Object.keys(H[run.uid]).length) delete H[run.uid]; }
+    else (H[run.uid] = H[run.uid] || {})[no] = { name, on: new Date().toISOString() };
+    saveHold(); P.openRow = null;
+    toast(back ? `<b>${esc(name)}</b> is back in the ${esc(run.name)} pay run · Pay Score ${v.s.score} → <b>${view(run).s.score}</b>`
+      : `<b>${esc(name)}</b> moved to <b>On Hold</b> and left out of ${esc(run.name)} · Pay Score ${v.s.score} → <b>${view(run).s.score}</b>`);
     render();
   }
 
@@ -202,16 +222,16 @@ export function payShield({ api, isTrained, render, toast, go }) {
     }).join('')}</div>`;
   }
 
-  function card(i) {
-    const open = i.state === 'open';
+  function card(i, uid) {
+    const open = i.state === 'open', onHold = !!uid, act = (how) => `psDecide:${i.id}-${how}${uid ? `-${uid}` : ''}`;
     return `<div class="psm-card ${open ? (i.held ? 'held' : 'review') : 'done'}">
       <div class="psm-ch"><span class="psm-av">${esc((i.name.match(/\b\w/g) || ['?']).slice(-2).join('').toUpperCase())}</span><div><b>${esc(i.name)}</b><small>${esc(i.no)}${i.basic ? ` · basic ${sgd(i.basic)}` : ''}</small></div>
         <span class="psm-tag ${open ? (i.held ? 'r' : 'o') : 'g'}">${open ? (i.held ? 'Held' : 'Review') : i.state === 'fixed' ? 'Fixed' : 'Accepted'}</span></div>
       <p>${esc(i.top.description)}${i.signals > 1 ? ` <span class="psm-more">+${i.signals - 1} more signal${i.signals > 2 ? 's' : ''}</span>` : ''}</p>
       <div class="psm-param"><span>${esc(i.param[0])}</span><code>${esc(i.param[1])}</code><span>${esc(i.param[2])}</span><span class="psm-imp">${open ? 'At risk' : 'Kept right'} <b>${sgd(i.impact, i.impact % 1 ? 2 : 0)}</b></span></div>
       <div class="psm-src">${i.top.source === 'ML' ? '🤖 Company ML model' : String(i.top.ruleId || '').startsWith('CMP') ? `📜 Compliance check ${esc(i.top.ruleId)}` : i.top.from === 'identity' ? '🪪 Identification check' : `📏 Payroll rule ${esc(i.top.ruleId || '')}`} · ${esc(i.top.recommendedAction || '')}</div>
-      ${open && locked() ? '<div class="psm-done" style="color:#6b7280">🔒 Pay run locked</div>' : open ? `<div class="psm-act"><button class="btn sm p" data-act="psDecide:${i.id}-fix" ${P.busy ? 'disabled' : ''}>${esc(i.fix[0])}</button><button class="btn sm" data-act="psDecide:${i.id}-alt" ${P.busy ? 'disabled' : ''}>${esc(i.alt[0])}</button></div>`
-        : `<div class="psm-done">✓ ${esc(i.state === 'fixed' ? i.fix[1] : i.alt[1])} ${locked() ? '' : `<button class="linkbtn" data-act="psDecide:${i.id}-undo">Undo</button>`}</div>`}
+      ${open && locked() && !onHold ? '<div class="psm-done" style="color:#6b7280">🔒 Pay run locked</div>' : open ? `<div class="psm-act"><button class="btn sm p" data-act="${act('fix')}" ${P.busy ? 'disabled' : ''}>${esc(i.fix[0])}</button><button class="btn sm" data-act="${act('alt')}" ${P.busy ? 'disabled' : ''}>${esc(i.alt[0])}</button>${!onHold && !i.runLevel ? `<button class="btn sm psm-holdbtn" data-act="psHold:${i.no}" ${P.busy ? 'disabled' : ''} title="Leave this employee out of the pay run and fix later from On Hold">⏸ Remove from pay run</button>` : ''}</div>`
+        : `<div class="psm-done">✓ ${esc(i.state === 'fixed' ? i.fix[1] : i.alt[1])} ${locked() && !onHold ? '' : `<button class="linkbtn" data-act="${act('undo')}">Undo</button>`}</div>`}
     </div>`;
   }
 
@@ -236,22 +256,22 @@ export function payShield({ api, isTrained, render, toast, go }) {
       if (!d) { P.emps[run.period] = 'loading'; api(`/api/v1/lookup/pay-runs/${run.uid}/employees`).then((x) => { P.emps[run.period] = x; }).catch((e) => { P.err = e.message; P.emps[run.period] = { employees: [] }; }).finally(render); }
       return '<div class="card muted" style="padding:16px">Loading employees…</div>';
     }
-    const by = Object.fromEntries(issues.filter((i) => i.guard === P.tab).map((i) => [i.no, i]));
+    const by = Object.fromEntries(issues.filter((i) => i.guard === P.tab).map((i) => [i.no, i])), hold = holdOf(run);
     const runRow = by[RUN_LEVEL] ? [{ e: { employee_no: RUN_LEVEL, name: '📋 Whole pay run', run: true }, i: by[RUN_LEVEL], st: rowState(by[RUN_LEVEL]) }] : [];
-    const rows = [...runRow, ...d.employees.map((e) => ({ e, i: by[e.employee_no], st: rowState(by[e.employee_no]) }))];
+    const rows = [...runRow, ...d.employees.map((e) => ({ e, i: by[e.employee_no], st: hold[e.employee_no] ? 'hold' : rowState(by[e.employee_no]) }))];
     const n = (k) => rows.filter((x) => x.st === k).length;
-    const order = { issue: 0, warn: 1, done: 2, ok: 3 };
+    const order = { issue: 0, warn: 1, done: 2, ok: 3, hold: 4 };
     const shown = rows.filter((x) => P.filter === 'all' || x.st === P.filter || (P.filter === 'ok' && x.st === 'done'))
       .sort((a, b) => order[a.st] - order[b.st] || (b.i?.impact || 0) - (a.i?.impact || 0) || a.e.employee_no.localeCompare(b.e.employee_no));
     const cols = COLS[P.tab];
-    const tag = { issue: '<span class="psm-tag r">⛔ Issue</span>', warn: '<span class="psm-tag o">⚠ Warning</span>', done: '', ok: '<span class="psm-tag g">✓ Passed</span>' };
+    const tag = { issue: '<span class="psm-tag r">⛔ Issue</span>', warn: '<span class="psm-tag o">⚠ Warning</span>', done: '', ok: '<span class="psm-tag g">✓ Passed</span>', hold: '<span class="psm-tag n">⏸ On hold</span>' };
     const chip = (k, label, cls) => `<button class="psm-f ${cls} ${P.filter === k ? 'on' : ''}" data-act="psFilter:${k}">${label}</button>`;
     return `<div class="psm-gh"><span class="psm-gi">${ICON[g[2]] || ''}</span><div><b>${g[1]}</b><small>${g[3]}</small></div></div>
       ${na ? '<div class="psm-clear" style="background:#f9fafb;border-color:#e5e7eb;color:#6b7280;margin-bottom:10px">Train the Identification area to run identity checks. Rows below show pay data only.</div>' : ''}
       <div class="psm-filters">${chip('all', `All <b>${rows.length}</b>`, '')}${chip('issue', `⛔ Issues <b>${n('issue')}</b>`, 'r')}${chip('warn', `⚠ Warnings <b>${n('warn')}</b>`, 'o')}${chip('ok', `✓ Passed <b>${n('ok') + n('done')}</b>`, 'g')}</div>
-      <div class="psm-tw"><table class="psm-t"><thead><tr><th>Employee</th>${cols.map(([h]) => `<th>${h}</th>`).join('')}<th>Result</th><th>Status</th></tr></thead><tbody>
+      <div class="psm-tw"><table class="psm-t psm-gt"><thead><tr><th class="c-emp">Employee</th>${cols.map(([h]) => `<th>${h}</th>`).join('')}<th class="c-res">Result</th><th class="c-st">Status</th></tr></thead><tbody>
       ${shown.map(({ e, i, st }) => {
-        const result = i ? `${esc(i.top.description)}${i.signals > 1 ? ` <span class="psm-more">+${i.signals - 1}</span>` : ''}` : (na ? '<span class="muted">Not checked</span>' : PASS[P.tab]);
+        const result = st === 'hold' ? '<span class="muted">Left out of this pay run · see On Hold</span>' : i ? `${esc(i.top.description)}${i.signals > 1 ? ` <span class="psm-more">+${i.signals - 1}</span>` : ''}` : (na ? '<span class="muted">Not checked</span>' : PASS[P.tab]);
         const status = st === 'done' ? `<span class="psm-tag g">✓ ${i.state === 'fixed' ? 'Fixed' : 'Accepted'}</span>` : tag[st];
         const open = P.openRow === `${P.tab}|${e.employee_no}`;
         return `<tr class="psm-r ${st} ${i ? 'click' : ''}" ${i ? `data-act="psRow:${e.employee_no}"` : ''}><td><b>${esc(e.name)}</b><small>${esc(e.employee_no)}</small></td>
@@ -287,7 +307,8 @@ export function payShield({ api, isTrained, render, toast, go }) {
   async function release() {
     const run = runOf(P.year, P.month);
     if (!run || P.busy) return;
-    if (!confirm(`Run payroll for ${run.name}?\n\nPay Score is 100: every finding was fixed or accepted. The pay run will be locked and no more changes can be made.`)) return;
+    const onHold = Object.keys(holdOf(run)).length;
+    if (!confirm(`Run payroll for ${run.name}?\n\nPay Score is 100: every finding was fixed or accepted.${onHold ? ` ${onHold} employee${onHold === 1 ? ' is' : 's are'} on hold and left out; pay them off-cycle from On Hold once fixed.` : ''} The pay run will be locked and no more changes can be made.`)) return;
     P.busy = 'release'; P.err = ''; render();
     try {
       const r = await api(`/api/v1/pay-runs/${run.uid}/release`, { method: 'POST' });
@@ -433,7 +454,7 @@ export function payShield({ api, isTrained, render, toast, go }) {
     const tabs = `<div class="psm-tabs">${[['overview', 'Overview', null], ...GUARDS.map(([k, n]) => [k, n, cnt(k)])].map(([k, n, c]) => `<button class="${P.tab === k ? 'on' : ''}" data-act="psTab:${k}">${n}${c ? ` <span>${c}</span>` : c === 0 ? ' <i>✓</i>' : ''}</button>`).join('')}</div>`;
     const hero = `<div class="psm-hero ${s.tone}"><div class="psm-score">${ring(s.score, s.tone)}<small>Pay Score</small></div>
       <div class="psm-sum"><div class="psm-eyebrow">PayShield · ${label} pay run</div><h3>${s.verdict}</h3>
-        <p>${s.open ? `${s.held} held · ${s.open - s.held} to review · <b>${sgd(s.atRisk)}</b> would be paid wrongly` : 'Every guard passed. Nothing open.'}</p>
+        <p>${v.held.length ? `<span class="psm-onhold" data-act="page:tiOnHold">⏸ ${v.held.length} employee${v.held.length === 1 ? '' : 's'} on hold, left out of this run</span><br>` : ''}${s.open ? `${s.held} held · ${s.open - s.held} to review · <b>${sgd(s.atRisk)}</b> would be paid wrongly` : 'Every guard passed. Nothing open.'}</p>
         ${proceed(run, v)}
         <div class="psm-kpis"><div><small>Checked</small><b>${a.totalEmployees}</b><em>employees</em></div><div><small>Findings</small><b>${issues.length}</b><em>${issues.length - s.open} resolved</em></div><div><small>At risk</small><b>${sgd(s.atRisk)}</b><em>if paid as is</em></div><div><small>Kept right</small><b class="g">${sgd(s.kept)}</b><em>fixed before payday</em></div></div></div></div>`;
     let content;
@@ -449,6 +470,40 @@ export function payShield({ api, isTrained, render, toast, go }) {
     return `${bar}${err}${strip()}${hero}${learnedNote(a, Object.fromEntries((P.people || []).map((e) => [e.employee_no, e.name])))}${tabs}<div class="psm-body">${content}</div>`;
   }
 
+  /* ---------- On Hold: employees taken out of a pay run, to fix and return (or pay off-cycle once the run is locked) ---------- */
+  const heldCount = () => Object.values(H).reduce((t, x) => t + Object.keys(x).length, 0);
+  function heldBody() {
+    if (!P.loaded && !P.busy) loadAll();
+    if (!P.runs) return '<div class="card muted" style="padding:16px">Loading…</div>';
+    const runs = P.runs.filter((r) => H[r.uid]);
+    const missing = runs.filter((r) => !(r.period in P.byPeriod));
+    if (missing.length && !P.busy) {
+      P.busy = 'load';
+      Promise.all(missing.map(async (r) => { P.byPeriod[r.period] = await api(`/api/v1/payroll/runs/${r.uid}/analysis`).catch(() => 'none'); if (P.byPeriod[r.period] !== 'none') await loadIdent(r); }))
+        .finally(() => { P.busy = ''; render(); });
+    }
+    if (!runs.length) return `<div class="psm-empty"><span class="psm-ei">⏸</span><h3>Nobody is on hold</h3><p>In PayShield, open a flagged employee and click <b>Remove from pay run</b> to leave them out of the run while you sort it out. They wait here with their findings, so the rest of the payroll can go ahead.</p><button class="btn p" data-act="page:tiPayShield">Go to PayShield</button></div>`;
+    // grouped by pay month, newest first; chips filter to one month
+    const sortKey = (p) => p.slice(3) + p.slice(0, 2), months = [...new Set(runs.map((r) => r.period))].sort((a, b) => sortKey(b).localeCompare(sortKey(a)));
+    if (P.holdMonth && !months.includes(P.holdMonth)) P.holdMonth = '';
+    const mLabel = (p) => `${MONTHS[+p.slice(0, 2) - 1]} ${p.slice(3)}`;
+    const nIn = (p) => runs.filter((r) => r.period === p).reduce((t, r) => t + Object.keys(H[r.uid]).length, 0);
+    const chip = (k, label, n) => `<button class="psm-f ${(P.holdMonth || '') === k ? 'on' : ''}" data-act="psHoldMonth:${k}">${label} <b>${n}</b></button>`;
+    return `<p class="psm-note" style="margin:0 0 14px">Employees left out of a pay run. Their findings stay here until fixed or accepted. Return them to the run while it is open, or pay them off-cycle once it is locked.</p>
+      <div class="psm-filters">${chip('', 'All months', heldCount())}${months.map((p) => chip(p, mLabel(p), nIn(p))).join('')}</div>
+      ${months.filter((p) => !P.holdMonth || p === P.holdMonth).map((p) => `<h3 class="psm-holdm">${mLabel(p)} <small>${nIn(p)} on hold</small></h3>${runs.filter((r) => r.period === p).map((run) => {
+        const v = view(run), list = Object.entries(H[run.uid]);
+        return `<section class="psm-hold"><header><b>${esc(run.name)}</b> <span class="psm-tag ${run.locked ? 'n' : 'o'}">${run.locked ? '🔒 Pay run completed' : 'Pay run open'}</span><small>${list.length} on hold${v ? ` · run Pay Score ${v.s.score}` : ''}</small></header>
+          ${list.map(([no, h]) => {
+            const xs = v ? v.parked.filter((i) => i.no === no) : [], open = xs.filter((i) => i.state === 'open').length;
+            return `<div class="psm-holdrow"><div class="psm-holdh"><span class="psm-av">${esc((h.name.match(/\b\w/g) || ['?']).slice(-2).join('').toUpperCase())}</span><div><b>${esc(h.name)}</b><small>${esc(no)} · on hold since ${fmtDate(h.on)}</small></div>
+                <span class="psm-tag ${open ? 'o' : 'g'}">${!v ? 'Loading…' : open ? `${open} to fix` : '✓ All fixed'}</span>
+                ${run.locked ? (open ? '' : `<button class="btn sm p" data-act="psPaid:${run.uid}|${no}">✓ Paid off-cycle</button>`) : `<button class="btn sm ${open ? '' : 'p'}" data-act="psReturn:${run.uid}|${no}" title="Put back into the pay run; its findings count in the Pay Score again">↩ Return to pay run</button>`}</div>
+              <div class="psm-holdcards">${xs.map((i) => card(i, run.uid)).join('') || '<small class="muted">No open findings</small>'}</div></div>`;
+          }).join('')}</section>`;
+      }).join('')}`).join('')}`;
+  }
+
   const actions = {
     psMonth: (k) => { P.month = +k; P.openRow = null; render(); },
     psTab: (k) => { P.tab = k; P.filter = 'all'; P.openRow = null; render(); },
@@ -462,7 +517,11 @@ export function payShield({ api, isTrained, render, toast, go }) {
     prRun: (m) => { P.month = +m; release(); },
     prCsv: (m) => csv(+m),
     prFcCsv: (m) => fcCsv(+m),
-    psDecide: (arg) => { const [id, how] = String(arg).split("-"); decide(id, how).catch((e) => { P.err = e.message; render(); }); },
+    psDecide: (arg) => { const [id, how, ...uid] = String(arg).split('-'); decide(id, how, uid.join('-')).catch((e) => { P.err = e.message; render(); }); },
+    psHold: (no) => hold(no, false),
+    psHoldMonth: (p) => { P.holdMonth = p || ''; render(); },
+    psReturn: (arg) => { const [uid, no] = String(arg).split('|'); hold(no, true, uid); },
+    psPaid: (arg) => { const [uid, no] = String(arg).split('|'); const h = H[uid]?.[no]; if (!h) return; delete H[uid][no]; if (!Object.keys(H[uid]).length) delete H[uid]; saveHold(); toast(`<b>${esc(h.name)}</b> marked as paid off-cycle and removed from On Hold`); render(); },
   };
   document.addEventListener('change', async (e) => {
     const w = e.target?.dataset?.ps;
@@ -478,7 +537,7 @@ export function payShield({ api, isTrained, render, toast, go }) {
     return v ? { score: v.s.score, verdict: v.s.tone === 'good' ? 'Ready' : v.s.tone === 'warn' ? 'Review' : 'Not ready', open: v.s.open, flagged: new Set(v.issues.filter((i) => i.state === 'open').map((i) => i.no)).size, blocking: v.s.score <= 79 && v.s.held > 0 } : null; };
   // open one month on the PayShield page (from another page)
   const openMonth = (y, m) => { P.year = y; P.month = m; P.tab = 'overview'; go('tiPayShield'); };
-  return { body, payRunBody, actions, reset, scoreFor, openMonth, learnedNote, label: () => `${MONTHS[P.month]} ${P.year}` };
+  return { body, payRunBody, heldBody, heldCount, actions, reset, scoreFor, openMonth, learnedNote, label: () => `${MONTHS[P.month]} ${P.year}` };
 }
 
 export const PAYSHIELD_CSS = `
@@ -494,6 +553,11 @@ export const PAYSHIELD_CSS = `
   .psm-m.on{outline:2px solid #4f46e5;outline-offset:1px}
   .psm-hero{display:flex;gap:22px;align-items:center;background:#fff;border:1px solid #e5e7eb;border-left:5px solid #9ca3af;border-radius:14px;padding:18px 20px;margin-bottom:14px}
   .psm-hero.bad{border-left-color:#ef4444}.psm-hero.warn{border-left-color:#f59e0b}.psm-hero.good{border-left-color:#10b981}
+  .psm-holdbtn{margin-left:auto;color:#92400e;border-color:#fcd34d;background:#fffbeb}.psm-onhold{display:inline-block;margin-bottom:4px;color:#92400e;cursor:pointer;text-decoration:underline dotted}
+  .psm-r.hold td{opacity:.55}.psm-tag.n{background:#f3f4f6;color:#4b5563;border-color:#d1d5db}
+  .psm-hold{background:#fff;border:1px solid #e5e7eb;border-radius:12px;margin-bottom:16px;overflow:hidden}.psm-hold>header{display:flex;gap:10px;align-items:center;padding:12px 16px;background:#f9fafb;border-bottom:1px solid #e5e7eb}.psm-hold>header small{margin-left:auto;color:#6b7280}
+  .psm-holdrow{padding:14px 16px;border-bottom:1px solid #f0f1f3}.psm-holdh{display:flex;gap:12px;align-items:center;margin-bottom:10px}.psm-holdh>div{flex:1}.psm-holdh small{display:block;color:#6b7280}
+  .psm-holdcards{display:grid;gap:10px}.psm-holdm{margin:18px 0 10px;font-size:15px}.psm-holdm small{color:#6b7280;font-weight:400;margin-left:6px}
   .psm-score{text-align:center}.psm-score small{color:#6b7280;font-weight:600}.psm-ring{width:120px;height:120px;display:block}
   .psm-sum{flex:1;min-width:0}.psm-eyebrow{font-size:11px;font-weight:800;color:#7c3aed;text-transform:uppercase;letter-spacing:.06em}.psm-sum h3{margin:2px 0 4px;font-size:22px}.psm-sum p{margin:0 0 12px;color:#4b5563}
   .psm-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.psm-kpis div{background:#f9fafb;border-radius:10px;padding:8px 10px}.psm-kpis small{display:block;font-size:11px;color:#6b7280}.psm-kpis b{font-size:18px}.psm-kpis b.g{color:#059669}.psm-kpis em{display:block;font-style:normal;font-size:11px;color:#9ca3af}
@@ -520,8 +584,10 @@ export const PAYSHIELD_CSS = `
   .psm-f{border:1px solid #e5e7eb;background:#fff;border-radius:999px;padding:6px 12px;font:inherit;font-size:12.5px;cursor:pointer;color:#374151}
   .psm-f b{margin-left:3px}.psm-f.on{background:#111827;color:#fff;border-color:#111827}.psm-f.r:not(.on){color:#b91c1c;border-color:#fecaca;background:#fef2f2}
   .psm-f.o:not(.on){color:#92400e;border-color:#fde68a;background:#fffbeb}.psm-f.g:not(.on){color:#065f46;border-color:#a7f3d0;background:#ecfdf5}
-  .psm-tw{background:#fff;border:1px solid #e5e7eb;border-radius:12px;overflow-x:auto}
-  .psm-t{width:100%;border-collapse:collapse;font-size:13px;min-width:720px}
+  .psm-tw{background:#fff;border:1px solid #e5e7eb;border-radius:12px;overflow:auto;max-height:calc(100vh - 140px);container-type:inline-size}
+  .psm-t thead th{position:sticky;top:0;z-index:2}
+  .psm-gt{table-layout:fixed}.psm-gt th{white-space:normal}.psm-gt .c-emp{width:22%}.psm-gt .c-res{width:34%}.psm-gt .c-st{width:120px}.psm-gt td{overflow-wrap:anywhere}
+  .psm-t{width:100%;border-collapse:collapse;font-size:13px;min-width:640px}
   .psm-t th{background:#f9fafb;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#6b7280;padding:9px 12px;border-bottom:1px solid #e5e7eb;white-space:nowrap}
   .psm-t td{padding:9px 12px;border-bottom:1px solid #f1f2f4;vertical-align:middle}.psm-t td small{display:block;color:#9ca3af;font-size:11.5px}
   .psm-r td:first-child{border-left:4px solid transparent}

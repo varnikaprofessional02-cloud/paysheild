@@ -354,6 +354,21 @@ export function intelligence({ S, render, openPage }) {
   .db-lv{padding:20px 24px;border-bottom:1px solid #f0f1f3}.db-lvh{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}.db-big{font-size:30px;font-weight:700}
   .db-bar{height:6px;background:#e5e7eb;border-radius:9px;overflow:hidden;display:flex;margin:12px 0 8px}.db-bar i{background:#2563eb;display:block}.db-bar i.p{background:#bfdbfe}
   .db-dot{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:3px}.db-dot.b{background:#2563eb}.db-dot.l{background:#bfdbfe}.db-dot.e{background:#e5e7eb}
+  .dz-hero{display:flex;justify-content:space-between;align-items:center;gap:24px;flex-wrap:wrap;background:linear-gradient(120deg,#0f766e,#0e7490);color:#fff;border:0}
+  .dz-hero small{opacity:.8;text-transform:uppercase;letter-spacing:.6px;font-size:11px}.dz-hero h2{margin:4px 0;font-size:24px;color:#fff}.dz-hero p{margin:0;opacity:.9}
+  .dz-steps{display:flex;gap:6px;list-style:none;margin:0;padding:0;flex-wrap:wrap}.dz-steps li{display:flex;flex-direction:column;align-items:center;gap:5px;min-width:64px;font-size:11.5px;opacity:.75}
+  .dz-steps i{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;font-style:normal;font-weight:700;border:2px solid rgba(255,255,255,.5)}
+  .dz-steps .done{opacity:1}.dz-steps .done i{background:#fff;color:#0f766e;border-color:#fff}.dz-steps .now{opacity:1;font-weight:700}.dz-steps .now i{border-color:#fde68a;color:#fde68a}
+  .dz-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px}@media(max-width:900px){.dz-stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
+  .dz-stat{background:#fff;border:1px solid #e5e7eb;border-top:3px solid var(--c);border-radius:12px;padding:14px 18px;--c:#2563eb}.dz-stat.v{--c:#7c3aed}.dz-stat.g{--c:#15803d}.dz-stat.o{--c:#c2410c}
+  .dz-stat small{color:#6b7280}.dz-stat b{display:block;font-size:26px;margin:4px 0;color:#111827}.dz-stat span{font-size:12px;color:var(--c)}
+  .dz-chart{display:flex;gap:14px;align-items:flex-end;height:170px;margin-top:18px}.dz-chart div{flex:1;height:100%;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:5px}
+  .dz-chart i{width:100%;max-width:42px;border-radius:6px 6px 0 0;background:#c4b5fd}.dz-chart i.cur{background:#7c3aed}.dz-chart em{font-style:normal;font-size:11px;color:#6b7280}.dz-chart span{font-size:12px;color:#374151}
+  .dz-mix{display:flex;height:14px;border-radius:99px;overflow:hidden;margin:22px 0 14px;gap:2px}.dz-mix i{display:block}
+  .dz-leg{list-style:none;margin:0;padding:0;display:grid;gap:8px}.dz-leg li{display:flex;align-items:center;gap:10px}.dz-leg span{width:10px;height:10px;border-radius:3px}.dz-leg b{margin-left:auto}.dz-leg small{width:38px;text-align:right;color:#6b7280}
+  .dz-todo{display:flex;gap:12px;align-items:center;padding:12px 24px;border-bottom:1px solid #f0f1f3}.dz-todo i{width:20px;height:20px;border-radius:6px;border:2px solid #d1d5db;display:grid;place-items:center;font-style:normal;font-size:12px;color:#fff}
+  .dz-todo.ok{color:#6b7280;text-decoration:line-through}.dz-todo.ok i{background:#16a34a;border-color:#16a34a}
+  .dz-date{display:flex;gap:16px;align-items:center;padding:13px 24px;border-bottom:1px solid #f0f1f3}.dz-date b{min-width:56px;padding:4px 8px;border-radius:8px;background:#fff7ed;color:#c2410c;text-align:center;font-size:12.5px}
   .db-warn{margin-top:14px;padding:10px 14px;border-radius:10px;background:#fffbeb;border:1px solid #fde68a;color:#92400e}.db-lv2{padding:16px 24px;border-bottom:1px solid #f0f1f3}
   .ag-chat{display:grid;gap:12px;background:#f8fafc}.ag-me{justify-self:end;max-width:75%;background:#2563eb;color:#fff;padding:12px 16px;border-radius:14px 14px 4px 14px}
   .ag-card{background:#fff;border:1px solid #e5e7eb;border-radius:14px;padding:16px 18px}.ag-h{display:flex;gap:8px;align-items:center;margin-bottom:8px}.ag-h svg{width:18px;height:18px;color:#2563eb}.ag-h>span{margin-left:auto}
@@ -418,7 +433,9 @@ export function intelligence({ S, render, openPage }) {
   @keyframes trspin{to{transform:rotate(360deg)}}`;
   if (!document.getElementById('tp-css')) document.head.insertAdjacentHTML('beforeend', `<style id="tp-css">${CSS}${PAYSHIELD_CSS}${FAB_CSS}</style>`);
   const DOT = '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="3" fill="currentColor"/></svg>';
-  const STATIC = { 'BASIC v5': ['Dashboard', 'Company Policy'], PRODUCT: ['EPM', 'Pay', 'Leave', 'IRAS', 'Claim', 'Query Builder'] };
+  const STATIC = { 'BASIC v5': ['Dashboard', 'Company Policy'], PRODUCT: ['Employee Profile Management', 'Payroll', 'Time Off'] };
+  // Payroll opens Pay runs once the company is subscribed and trained; other product items are placeholders
+  const LINKS = { Dashboard: ['tiDash', ICON.home], Payroll: ['tiPayRun', ICON.receipt] };
   function shell(crumb, body, groups, active) {
     document.body.classList.add('tp-mode');
     const on = !!T.sub?.subscribed, trained = anyTrained();
@@ -430,7 +447,7 @@ export function intelligence({ S, render, openPage }) {
       : `<div class="subbox"><b>Times Intelligence</b><p>PayShield pay run assurance and ML anomaly detection trained on your own payroll.</p><button class="tpbtn" data-act="tiSubscribe" ${T.busy ? 'disabled' : ''}>${T.busy === 'tiSubscribe' ? 'Subscribing…' : 'Subscribe to Times Intelligence'}</button></div>`;
     const title = (crumb.match(/<b>(.*?)<\/b>/) || [, crumb])[1];
     return `<div class="tp"><aside><div class="co"><i></i>${esc(T.ctx?.companyName || 'CARLTON HOTEL (SINGAPORE) PTE LTD')}</div>
-      ${Object.entries(STATIC).map(([h, xs]) => `<div class="${h === 'PRODUCT' ? 'sec' : 'plan'}">${h}</div>${xs.map((x) => x === 'Dashboard' ? `<a class="it ${active === 'tiDash' ? 'on' : ''}" data-act="page:tiDash">${ICON.home}<span>${x}</span></a>` : `<a class="it dim">${DOT}<span>${x}</span></a>`).join('')}`).join('')}
+      ${Object.entries(STATIC).map(([h, xs]) => `<div class="${h === 'PRODUCT' ? 'sec' : 'plan'}">${h}</div>${xs.map((x) => { const l = LINKS[x]; return l && (x === 'Dashboard' || (on && trained)) ? `<a class="it ${active === l[0] ? 'on' : ''}" data-act="page:${l[0]}">${l[1] || DOT}<span>${x}</span></a>` : `<a class="it dim">${DOT}<span>${x}</span></a>`; }).join('')}`).join('')}
       <div class="sec ti">TIMES INTELLIGENCE <span class="new">NEW</span></div>${ti}
       <div class="ft">Times Portal · ${esc(T.ctx?.database || 'prod-is-down')} · <button data-act="resetRun">reset demo data</button></div></aside>
       <main><div class="top"><div><div style="color:#6b7280">Welcome back, Thilanka Potter!</div><b>October, 2026</b></div>
@@ -438,48 +455,33 @@ export function intelligence({ S, render, openPage }) {
       <div class="content"><h2>${active === 'tiDash' ? '' : !on ? 'Times Intelligence' : active === 'tiOnboard' ? 'Welcome to Times Intelligence' : title}</h2>${active === 'tiDash' ? body : on || active === 'tiSubscribe' ? (on && !T.status ? '<div class="card muted">Checking your company model…</div>' : body) : subscribeBody()}</div></main>${on && trained && active === 'tiPayShield' ? fabHtml() : ''}</div>`;
   }
 
-  /* ---------- portal dashboard (mock data, look-alike of the Times portal home) ---------- */
+  /* ---------- portal dashboard (mock data) ---------- */
   function dashBody() {
-    const d = new Date(), hr = d.getHours(), greet = hr < 12 ? 'Good morning' : hr < 18 ? 'Good afternoon' : 'Good evening';
-    const C = 2 * Math.PI * 34, worked = 13.25;
-    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'], today = (d.getDay() + 6) % 7;
-    const appr = [['DT', 'Daniel Tan', 'Leave', 'Annual leave · 13–15 Oct (3 days)'], ['SC', 'Shalini Chandran', 'Leave', 'Half day (PM) · 9 Oct'], ['KL', 'Kevin Lim', 'Claim', 'S$248.60 · Client lunch']];
-    const kp = [['Headcount', '248', '+6.4% vs last period', ICON.users, 'b'], ['New hires', '9', '2 starting this month', ICON.users, 'g'],
-      ['Attrition', '1.3%', '-0.4% vs last period', ICON.users, 'o'], ['Open roles', '12', '5 in final interviews', ICON.building || ICON.wallet, 'v']];
-    const links = [['Apply Leave', ICON.calendar], ['Submit Claim', ICON.receipt], ['My Payslips', ICON.wallet], ['Timesheet', ICON.clock], ['Employee Directory', ICON.users]];
+    const d = new Date(), month = d.toLocaleDateString('en-SG', { month: 'long', year: 'numeric' });
+    const stats = [['Active employees', '50', '+3 joiners · 1 leaver', 'b'], ['Payroll cost', 'S$286K', 'gross, this month', 'v'],
+      ['CPF payable', 'S$54.1K', 'due 14th next month', 'g'], ['Days to pay date', '3', 'pay date: last working day', 'o']];
+    const steps = [['Cut-off', 'done'], ['Inputs', 'done'], ['Draft run', 'now'], ['Review', ''], ['Approve', ''], ['Bank file', '']];
+    const trend = [['May', 262], ['Jun', 266], ['Jul', 270], ['Aug', 274], ['Sep', 280], ['Oct', 286]], max = 300;
+    const mix = [['Citizen', 29, '#2563eb'], ['PR', 8, '#60a5fa'], ['EP', 4, '#7c3aed'], ['S Pass', 5, '#a78bfa'], ['Work Permit', 4, '#f59e0b']], tot = mix.reduce((s, m) => s + m[1], 0);
+    const todo = [['Confirm 3 new joiner bank accounts', true], ['Import overtime hours for Operations', true], ['Review 1 leaver final pay', false], ['Approve allowance changes (2)', false], ['Upload CPF file after approval', false]];
+    const dates = [['14 Nov', 'CPF contribution submission'], ['20 Nov', '1 work pass up for renewal'], ['28 Nov', 'November input cut-off'], ['1 Mar', 'Employment income filing (AIS)']];
     const head = (ic, t, right = '', tone = 'b') => `<header class="db-h"><span class="db-ic ${tone}">${ic}</span><b>${t}</b><span class="db-r">${right}</span></header>`;
     return `<div class="db">
-    <div class="db-row r1">
-      <section class="db-card db-hello"><small class="muted">📅 ${d.toLocaleDateString('en-SG', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</small>
-        <h2>${greet}, Thilanka Potter</h2><p>You have <b>5 pending approvals</b> and <b>2 events</b> coming up this week.<br>8 people are out today.</p>
-        <div class="db-wx"><div class="db-wt"><span style="font-size:34px">⛅</span><b>31°</b><span>Partly cloudy<br><small class="muted">📍 Singapore · H 32° L 26°</small></span></div>
-          <div class="db-wn">☂ Thunderstorms expected around 6 PM. Bring an umbrella.</div></div></section>
-      <section class="db-card">${head(ICON.clock, 'My Workday', '<span class="db-pill g">Clocked in</span>')}
-        <div class="db-work"><div class="db-ring"><svg viewBox="0 0 80 80"><circle cx="40" cy="40" r="34" stroke="#2563eb" stroke-width="6" fill="none" stroke-dasharray="${C}" stroke-dashoffset="${C * (1 - Math.min(1, worked / 9))}" transform="rotate(-90 40 40)"/></svg><div><b>13h 15m</b><small>of 9h 00m</small></div></div>
-          <dl><dt>CLOCK IN</dt><dd>09:02 AM</dd><dt>SHIFT</dt><dd>9:00 – 18:00</dd><dt>THIS WEEK</dt><dd>36h 10m</dd></dl></div>
-        <div class="db-week">${days.map((x, i) => `<div class="${i < today ? 'done' : i === today ? 'now' : ''}"><i></i><span>${x}</span></div>`).join('')}</div>
-        <div style="text-align:right"><button class="db-btn red">⇥ Clock out</button></div></section>
+    <section class="db-card dz-hero"><div><small>Payroll cycle</small><h2>${month}</h2><p>Draft run in progress · 2 of 6 steps complete</p></div>
+      <ol class="dz-steps">${steps.map(([n, c], i) => `<li class="${c}"><i>${c === 'done' ? '✓' : i + 1}</i><span>${n}</span></li>`).join('')}</ol></section>
+    <div class="dz-stats">${stats.map(([l, v, s, t]) => `<div class="dz-stat ${t}"><small>${l}</small><b>${v}</b><span>${s}</span></div>`).join('')}</div>
+    <div class="db-row">
+      <section class="db-card">${head(ICON.chart, 'Payroll cost, last 6 months', '<small>S$ thousands</small>', 'v')}
+        <div class="dz-chart">${trend.map(([m, v], i) => `<div><em>${v}</em><i class="${i === trend.length - 1 ? 'cur' : ''}" style="height:${(v / max) * 100}%"></i><span>${m}</span></div>`).join('')}</div></section>
+      <section class="db-card">${head(ICON.users, 'Workforce by residency', `<small>${tot} employees</small>`)}
+        <div class="dz-mix">${mix.map(([, n, c]) => `<i style="width:${(n / tot) * 100}%;background:${c}"></i>`).join('')}</div>
+        <ul class="dz-leg">${mix.map(([l, n, c]) => `<li><span style="background:${c}"></span>${l}<b>${n}</b><small>${Math.round((n / tot) * 100)}%</small></li>`).join('')}</ul></section>
     </div>
     <div class="db-row">
-      <section class="db-card p0">${head(ICON.library || ICON.receipt, 'Pending Approvals', '<span class="db-cnt">5</span> <a>View all</a>')}
-        <div class="db-tabs"><span class="on">All · 5</span><span>Leave · 2</span><span>Claims · 2</span><span>OT · 1</span></div>
-        ${appr.map(([i, n, t, s]) => `<div class="db-ap"><span class="db-av">${i}</span><div><b>${n}</b><div><span class="db-tag ${t === 'Claim' ? 'b' : 'o'}">${t}</span> <small class="muted">${s}</small></div></div><span class="db-ok">✓</span><span class="db-no">✕</span></div>`).join('')}
-        <footer><a>+2 more pending</a></footer></section>
-      <section class="db-card p0">${head('📣', 'Announcements', '', 'o')}
-        <div class="db-an"><span class="db-ic b">📣</span><div><b>Q4 Town Hall on 14 Oct</b> <span class="db-pill b">📌 Pinned</span><p>Join the CEO for the quarterly update, followed by Q&amp;A. Level 12 auditorium or via Teams.</p><small class="muted">HR Team · 23 Oct 2026</small></div></div>
-        <div class="db-an"><span class="db-ic b">${ICON.shield}</span><div><b>2027 medical benefits enrolment opens</b><p>Review your coverage and add dependants before 31 Oct. New dental plan options are now available.</p><small class="muted">Benefits · 22 Oct 2026</small></div></div>
-        <footer><a>View all announcements</a></footer></section>
-    </div>
-    <section class="db-card">${head(ICON.chart, 'HR Analytics', '<span class="db-seg"><span>3M</span><span>6M</span><span class="on">12M</span></span>')}
-      <div class="db-kpis">${kp.map(([l, v, s, ic, t]) => `<div class="db-kpi ${t}"><small>${l}</small><b>${v}</b><span class="db-ki">${ic}</span><small class="muted">${s}</small></div>`).join('')}</div></section>
-    <div class="db-row">
-      <section class="db-card p0">${head('🔗', 'Quick Links', '<a>Edit</a>', 'v')}${links.map(([l, ic]) => `<div class="db-ln"><span class="db-li">${ic}</span>${l}<span class="db-r">›</span></div>`).join('')}</section>
-      <section class="db-card p0">${head('✈', 'My Leave Balance', '<a>Apply leave</a>', 'g')}
-        <div class="db-lv"><div class="db-lvh"><b>Annual leave</b><small class="muted">2026</small></div><div><span class="db-big">12</span> <span class="muted">of 18 days left</span></div>
-          <div class="db-bar"><i style="width:22%"></i><i class="p" style="width:11%"></i></div>
-          <small><span class="db-dot b"></span>Taken <b>4</b> &nbsp; <span class="db-dot l"></span>Pending <b>2</b> &nbsp; <span class="db-dot e"></span>Available <b>12</b></small>
-          <div class="db-warn">⏱ Use 4 days by 31 Dec 2026 or they’ll expire</div></div>
-        ${[['Medical leave', 11, 14], ['Childcare leave', 4, 6]].map(([n, l, t]) => `<div class="db-lv2"><div class="db-lvh"><span>${n}</span><span><b>${l}</b> <small class="muted">/ ${t} days left</small></span></div><div class="db-bar"><i style="width:${(t - l) / t * 100}%"></i></div></div>`).join('')}</section>
+      <section class="db-card p0">${head('☑', 'This cycle’s checklist', `<small>${todo.filter((t) => t[1]).length} of ${todo.length} done</small>`, 'g')}
+        ${todo.map(([t, ok]) => `<div class="dz-todo ${ok ? 'ok' : ''}"><i>${ok ? '✓' : ''}</i>${t}</div>`).join('')}</section>
+      <section class="db-card p0">${head(ICON.calendar || '📅', 'Upcoming dates', '', 'o')}
+        ${dates.map(([w, t]) => `<div class="dz-date"><b>${w}</b><span>${t}</span></div>`).join('')}</section>
     </div></div>`;
   }
 
@@ -1056,14 +1058,15 @@ export function intelligence({ S, render, openPage }) {
   const pages = {
     tiDash: { crumb: 'Home › <b>Dashboard</b>', body: dashBody },
     tiPayShield: { crumb: 'Times Intelligence › <b>PayShield</b>', body: () => PS.body() },
+    tiOnHold: { crumb: 'PayShield › <b>On Hold</b>', body: () => PS.heldBody() },
     tiTeach: { crumb: 'Times Intelligence › <b>Teach the agent</b>', body: teachBody },
-    tiPayRun: { crumb: 'Times Intelligence › <b>Pay runs</b>', body: () => PS.payRunBody() },
+    tiPayRun: { crumb: 'Payroll › <b>Pay runs</b>', body: () => PS.payRunBody() },
     tiSubscribe: { crumb: 'Times Intelligence › <b>Subscription</b>', body: subscribeBody },
     tiAnomaly: { crumb: 'Times Intelligence › <b>AI anomaly detection</b>', body: anomalyBody },
     tiTrain: { crumb: 'Times Intelligence › <b>Train model</b>', body: trainBody },
     tiIdentity: { crumb: 'Times Intelligence › <b>Identity checks</b>', body: identityBody },
   };
-  const labels = { tiTeach: 'Teach the agent', tiPayShield: 'PayShield', tiPayRun: 'Pay runs', tiDash: 'Dashboard', tiSubscribe: 'Times Intelligence', tiAnomaly: 'AI anomaly detection', tiTrain: 'Train model', tiIdentity: 'Identity checks' };
+  const labels = { tiTeach: 'Teach the agent', tiPayShield: 'PayShield', tiOnHold: 'On Hold', tiPayRun: 'Pay runs', tiDash: 'Dashboard', tiSubscribe: 'Times Intelligence', tiAnomaly: 'AI anomaly detection', tiTrain: 'Train model', tiIdentity: 'Identity checks' };
 
   const menu = () => [{ label: 'AI model', items: T.sub?.subscribed ? [
     ...(isTrained('PAYROLL') ? [{ k: 'tiAnomaly', label: 'AI anomaly detection', icon: 'spark', act: 'page:tiAnomaly', tag: '<span class="new">AI</span>' }] : []),
@@ -1145,5 +1148,5 @@ export function intelligence({ S, render, openPage }) {
     if (ctx) { H['X-Tenant-Uid'] = ctx.tenantUid; H['X-Company-Uid'] = ctx.companyUid; T.ctx = ctx; }
     return api('/api/v1/intelligence/subscription'); }).then(async (s) => { T.sub = s; if (s.subscribed) { await loadModel(); T.loaded.model = true; } }).catch((e) => { T.err = e.message; }).finally(render);
 
-  return { pages, labels, menu, actions: { ...actions, ...agentActions, ...PS.actions }, shell, agentPage: agentBody };
+  return { pages, labels, menu, heldCount: () => PS.heldCount(), actions: { ...actions, ...agentActions, ...PS.actions }, shell, agentPage: agentBody };
 }
