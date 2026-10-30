@@ -78,6 +78,11 @@ def reset(pg_bin: str, port: int, n_employees: int) -> None:
         seed_lookups(c)
         seed_company(c, sc)
         c.execute("UPDATE company.company SET name='CARLTON HOTEL (SINGAPORE) PTE LTD' WHERE id=%s", (COMPANY.id,))
+        # the clean history months were paid long ago: locked, the way the payroll module closes a run (records in status 4).
+        # The months seeded below stay open for PayShield to check, and the payroll model trains on locked runs only.
+        c.execute("UPDATE payroll.pay_run SET is_lock = true WHERE pay_period_id IN (SELECT id FROM payroll.pay_period WHERE company_id=%s)", (COMPANY.id,))
+        c.execute("""UPDATE payroll.pay_record SET status_id = 4 WHERE pay_run_id IN (SELECT r.id FROM payroll.pay_run r
+                     JOIN payroll.pay_period pp ON pp.id = r.pay_period_id WHERE pp.company_id=%s)""", (COMPANY.id,))
         print(f"  named {name_employees(c, COMPANY.id)} employees")
         print("  seeding identity data (NRIC/FIN, work passes, bank accounts) with planted problems:",
               seed_identity(c, sc, COMPANY.id))
@@ -121,13 +126,15 @@ def inject_run(dsn: str, n_employees: int, change_ids: bool = True) -> dict:
         scen[ot[extra % len(ot)].user_id] = "unusual_overtime"
         period = _next_month(last.period)
         comp = COMPLIANCE_SCENARIOS if period >= date.today().replace(day=1) else COMPLIANCE_SCENARIOS[(extra * 3) % 10:][:3]
-        free = lambda pool: next(u for u in pool if u.user_id not in scen)  # noqa: E731
+        free = lambda pool: next((u for u in pool if u.user_id not in scen), None)  # noqa: E731
+        rot = lambda xs, k: xs[k % len(xs):] + xs[:k % len(xs)] if xs else xs  # noqa: E731  wraps for small companies
         local = [u for u in users if not u.foreign]
         for s in comp:
-            pool = (ot[extra + 1:] + ot[:extra + 1] if s in ("ot_over_limit", "ot_rate_low")
-                    else [u for u in users if u.foreign][extra:] if s == "cpf_on_foreigner"
-                    else sorted(local, key=lambda u: -u.basic)[extra:] if s == "aw_over_ceiling" else plain)
-            scen[free(pool).user_id] = s
+            pool = (rot(ot, extra + 1) if s in ("ot_over_limit", "ot_rate_low")
+                    else rot([u for u in users if u.foreign], extra) if s == "cpf_on_foreigner"
+                    else rot(sorted(local, key=lambda u: -u.basic), extra) if s == "aw_over_ceiling" else plain)
+            if (u := free(pool)) is not None:
+                scen[u.user_id] = s
         sc._ids[0] = 2_000_000 + extra * 10_000
         run, recs, revs = make_analysis_run(sc, scen, seed=100 + extra)
         seed_revisions(c, sc, revs)

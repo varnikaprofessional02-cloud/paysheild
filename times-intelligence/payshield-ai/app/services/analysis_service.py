@@ -161,10 +161,18 @@ class PayShieldService:
             master = self.payroll.get_pay_code_master(ctx.company_id)
             # this company only: company_id is part of every history query
             history = self.payroll.list_history_records(ctx.company_id, date(2000, 1, 1), date(2999, 1, 1), None, master, overtime)
+            # learn "normal" only from locked (paid and closed) pay runs: an open run may still hold errors nobody has
+            # reviewed, and those would be learned as normal and counted as false alarms by the quality gate.
+            # Until enough months are locked, fall back to every completed run.
+            locked = [r for r in history if r.status_id == 4]
+            history_filter = "LOCKED_ONLY" if len({r.period for r in locked}) >= self.s.ml.min_training_periods else "ALL_COMPLETED"
+            if history_filter == "LOCKED_ONLY":
+                history = locked
             active = self.registry.load_active(ctx.tenant_uid, self._company(ctx))
             result = train_company_model(company=self._company(ctx), history_records=history, ml=self.s.ml,
                                          overtime_codes=overtime, active_pipeline=active[1].pipeline if active else None,
                                          auto_activate=setting.auto_activate_models)
+            result.report = {**(result.report or {}), "history_filter": history_filter}
             model_id = None
             if result.pipeline is not None:
                 model_id = self.registry.register(ctx.tenant_uid, self._company(ctx), result, job.id, ctx.actor, started).id

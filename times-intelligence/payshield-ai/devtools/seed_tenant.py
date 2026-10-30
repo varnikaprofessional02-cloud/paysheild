@@ -104,13 +104,29 @@ def seed_runs(c, sc: SyntheticCompany, runs: list[PayRunRef], records: list[PayR
         c.execute(f"""INSERT INTO payroll.pay_run (id, uid, name, pay_run_date, pay_cycle_id, pay_period_id, is_trial) {OV}
                      VALUES (%s,%s,%s,%s,%s,%s,%s)""",
                   (run.id, run.uid, run.name, run.pay_run_date, cycle_ids[run.cycle_code], pp["id"], run.is_trial))
+    # a "paid twice" employee has two records in one run; the unique index (pay_run_id, user_id, contract_id)
+    # allows that only under a second contract, so the duplicate goes on a copy of the employee's contract
+    seen, rows = set(), []
+    for r in records:
+        contract_id = r.contract_id
+        if (r.pay_run_id, r.user_id, contract_id) in seen:
+            contract_id = r.contract_id + 900_000
+            cols = [x["column_name"] if isinstance(x, dict) else x[0] for x in c.execute(
+                "SELECT column_name FROM information_schema.columns WHERE table_schema='employee' AND table_name='user_company_contract' "
+                "AND is_generated='NEVER' AND column_name NOT IN ('id','uid') ORDER BY ordinal_position").fetchall()]
+            names = ", ".join(f'"{n}"' for n in cols)
+            c.execute(f"""INSERT INTO employee.user_company_contract (id, uid, {names}) {OV}
+                         SELECT %s, gen_random_uuid(), {names} FROM employee.user_company_contract WHERE id = %s
+                         ON CONFLICT DO NOTHING""", (contract_id, r.contract_id))
+        seen.add((r.pay_run_id, r.user_id, contract_id))
+        rows.append((r, contract_id))
     with c.cursor() as cur:
         cur.executemany(f"""INSERT INTO payroll.pay_record (id, uid, user_id, contract_id, basic_salary, total_allowance,
                 total_deduction, total_cpf, total_payout, data_processed, pay_run_id, status_id, is_new_hire, is_resignee) {OV}
             VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::json,%s,%s,%s,%s)""",
-                        [(r.pay_record_id, r.pay_record_uid, r.user_id, r.contract_id, r.basic_earned, r.total_allowance,
+                        [(r.pay_record_id, r.pay_record_uid, r.user_id, contract_id, r.basic_earned, r.total_allowance,
                           r.total_deduction, r.total_cpf_column, r.net_pay, json.dumps(build_data_processed(r)), r.pay_run_id,
-                          r.status_id, r.is_new_hire, r.is_resignee) for r in records])
+                          r.status_id, r.is_new_hire, r.is_resignee) for r, contract_id in rows])
 
 
 def grant_pay_permission(c, user_uid: str, permissions=("View", "Edit")) -> None:
